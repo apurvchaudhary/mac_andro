@@ -192,4 +192,20 @@ void main() {
     expect(find.text('New York'), findsOneWidget);
     expect(find.text('UTC'), findsOneWidget);
   });
+
+  testWidgets('compact landscape layout keeps all bottom sections visible', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    tester.view.physicalSize = const Size(900, 450);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(const DashboardApp());
+    await tester.pumpAndSettle();
+
+    expect(find.text('New Delhi'), findsOneWidget);
+    expect(find.text(monthYearLabel(DateTime.now())), findsOneWidget);
+    expect(find.text('Meetings'), findsAtLeastNWidgets(1));
+  });
 }

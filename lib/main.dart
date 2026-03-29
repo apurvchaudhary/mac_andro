@@ -23,6 +23,7 @@ Future<void> main() async {
     DeviceOrientation.landscapeLeft,
     DeviceOrientation.landscapeRight,
   ]);
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   await WakelockPlus.enable();
   runApp(const DashboardApp());
 }
@@ -252,18 +253,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: SafeArea(
           child: LayoutBuilder(
             builder: (context, constraints) {
-              const spacing = 12.0;
+              final compactDashboard =
+                  constraints.maxWidth < 1000 || constraints.maxHeight < 560;
+              final spacing = compactDashboard ? 4.0 : 12.0;
               if (constraints.maxWidth <= 0 || constraints.maxHeight <= 0) {
                 return const SizedBox.shrink();
               }
 
               return Padding(
-                padding: const EdgeInsets.all(spacing),
+                padding: EdgeInsets.all(compactDashboard ? 4 : spacing),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Flexible(
-                      flex: 8,
+                      flex: compactDashboard ? 6 : 8,
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
@@ -275,7 +278,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               onHold: _openDataSourceSettings,
                             ),
                           ),
-                          const SizedBox(width: spacing),
+                          SizedBox(width: spacing),
                           Expanded(
                             child: GaugeCard(
                               label: 'Memory',
@@ -284,7 +287,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               onHold: _openDataSourceSettings,
                             ),
                           ),
-                          const SizedBox(width: spacing),
+                          SizedBox(width: spacing),
                           Expanded(
                             child: GaugeCard(
                               label: 'Network',
@@ -294,7 +297,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               onHold: _openDataSourceSettings,
                             ),
                           ),
-                          const SizedBox(width: spacing),
+                          SizedBox(width: spacing),
                           Expanded(
                             child: GaugeCard(
                               label: 'Battery',
@@ -306,9 +309,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: spacing),
+                    SizedBox(height: spacing),
                     Flexible(
-                      flex: 12,
+                      flex: compactDashboard ? 14 : 12,
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
@@ -316,24 +319,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             child: ClocksCard(
                               clockConfigs: _clockConfigs,
                               onHold: _openClockSettings,
+                              compactMode: compactDashboard,
                             ),
                           ),
-                          const SizedBox(width: spacing),
+                          SizedBox(width: spacing),
                           Expanded(
                             child: CalendarCard(
                               displayMonth: _displayMonth,
                               onPrev: () => _shiftMonth(-1),
                               onNext: () => _shiftMonth(1),
                               onHold: _openCalendarPage,
+                              compactMode: compactDashboard,
                             ),
                           ),
-                          const SizedBox(width: spacing),
+                          SizedBox(width: spacing),
                           Expanded(
                             child: EventsCard(
                               events: upcomingEvents,
                               onHold: _openDataSourceSettings,
                               onRefresh: _refreshMeetingsPanel,
                               refreshToken: _meetingsRefreshToken,
+                              compactMode: compactDashboard,
                             ),
                           ),
                         ],
@@ -489,10 +495,12 @@ class ClocksCard extends StatefulWidget {
     super.key,
     required this.clockConfigs,
     required this.onHold,
+    this.compactMode = false,
   });
 
   final List<ClockConfig> clockConfigs;
   final VoidCallback onHold;
+  final bool compactMode;
 
   @override
   State<ClocksCard> createState() => _ClocksCardState();
@@ -526,20 +534,34 @@ class _ClocksCardState extends State<ClocksCard> {
     return GestureDetector(
       onTap: widget.onHold,
       child: DashboardCard(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        padding: widget.compactMode
+            ? const EdgeInsets.fromLTRB(6, 5, 6, 5)
+            : const EdgeInsets.fromLTRB(14, 12, 14, 12),
         child: LayoutBuilder(
           builder: (context, constraints) {
             final count = widget.clockConfigs.length.clamp(1, 4);
-            final compact = constraints.maxHeight < 210;
+            final compact = widget.compactMode || constraints.maxHeight < 210;
             final stacked = count <= 2;
+            final tallCompactStack = widget.compactMode && count == 3;
+            final fullHeightCompactGrid = widget.compactMode && count == 4;
 
-            final titleSize = stacked
-                ? (compact ? 15.0 : 20.0)
-                : (compact ? 13.0 : 16.0);
-            final timeSize = stacked
-                ? (compact ? 50.0 : 76.0)
-                : (compact ? 30.0 : 40.0);
-            final gap = stacked ? (compact ? 4.0 : 8.0) : 4.0;
+            final titleSize = widget.compactMode
+                ? (tallCompactStack
+                    ? 15.0
+                    : (fullHeightCompactGrid ? 15.0 : (stacked ? 17.0 : 14.5)))
+                : (stacked ? (compact ? 15.0 : 20.0) : (compact ? 13.0 : 16.0));
+            final timeSize = widget.compactMode
+                ? (tallCompactStack
+                    ? 44.0
+                    : (fullHeightCompactGrid
+                          ? 40.0
+                          : (stacked ? 60.0 : 35.0)))
+                : (stacked ? (compact ? 50.0 : 76.0) : (compact ? 30.0 : 40.0));
+            final gap = widget.compactMode
+                ? (tallCompactStack
+                      ? 2.0
+                      : (fullHeightCompactGrid ? 2.0 : (stacked ? 3.0 : 2.0)))
+                : (stacked ? (compact ? 4.0 : 8.0) : 4.0);
 
             final displays = widget.clockConfigs
                 .map(
@@ -551,9 +573,9 @@ class _ClocksCardState extends State<ClocksCard> {
                 )
                 .toList();
 
-            final content = stacked
+            final content = tallCompactStack
                 ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       for (var i = 0; i < displays.length; i++) ...[
                         Expanded(
@@ -564,9 +586,95 @@ class _ClocksCardState extends State<ClocksCard> {
                             titleSize: titleSize,
                             timeSize: timeSize,
                             gap: gap,
+                            boldTime: true,
                           ),
                         ),
-                        if (i != displays.length - 1) const SizedBox(height: 8),
+                        if (i != displays.length - 1) const SizedBox(height: 2),
+                      ],
+                    ],
+                  )
+                : fullHeightCompactGrid
+                ? Column(
+                    children: [
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: ClockBlock(
+                                title: displays[0].title,
+                                accentColor: displays[0].color,
+                                time: displays[0].time,
+                                titleSize: titleSize,
+                                timeSize: timeSize,
+                                gap: gap,
+                                boldTime: true,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: ClockBlock(
+                                title: displays[1].title,
+                                accentColor: displays[1].color,
+                                time: displays[1].time,
+                                titleSize: titleSize,
+                                timeSize: timeSize,
+                                gap: gap,
+                                boldTime: true,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: ClockBlock(
+                                title: displays[2].title,
+                                accentColor: displays[2].color,
+                                time: displays[2].time,
+                                titleSize: titleSize,
+                                timeSize: timeSize,
+                                gap: gap,
+                                boldTime: true,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: ClockBlock(
+                                title: displays[3].title,
+                                accentColor: displays[3].color,
+                                time: displays[3].time,
+                                titleSize: titleSize,
+                                timeSize: timeSize,
+                                gap: gap,
+                                boldTime: true,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  )
+                : stacked
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      for (var i = 0; i < displays.length; i++) ...[
+                        Expanded(
+                          child: ClockBlock(
+                            title: displays[i].title,
+                            accentColor: displays[i].color,
+                            time: displays[i].time,
+                            titleSize: titleSize,
+                            timeSize: timeSize,
+                            gap: gap,
+                            boldTime: widget.compactMode,
+                          ),
+                        ),
+                        if (i != displays.length - 1)
+                          SizedBox(height: widget.compactMode ? 2 : (compact ? 4 : 8)),
                       ],
                     ],
                   )
@@ -577,9 +685,9 @@ class _ClocksCardState extends State<ClocksCard> {
                     gridDelegate:
                         const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 2,
-                          crossAxisSpacing: 8,
-                          mainAxisSpacing: 8,
-                          childAspectRatio: 1.45,
+                          crossAxisSpacing: 4,
+                          mainAxisSpacing: 4,
+                          childAspectRatio: 1.5,
                         ),
                     itemBuilder: (context, index) {
                       final item = displays[index];
@@ -590,6 +698,7 @@ class _ClocksCardState extends State<ClocksCard> {
                         titleSize: titleSize,
                         timeSize: timeSize,
                         gap: gap,
+                        boldTime: widget.compactMode,
                       );
                     },
                   );
@@ -623,6 +732,7 @@ class ClockBlock extends StatelessWidget {
     required this.titleSize,
     required this.timeSize,
     required this.gap,
+    this.boldTime = false,
   });
 
   final String title;
@@ -631,6 +741,7 @@ class ClockBlock extends StatelessWidget {
   final double titleSize;
   final double timeSize;
   final double gap;
+  final bool boldTime;
 
   @override
   Widget build(BuildContext context) {
@@ -640,11 +751,12 @@ class ClockBlock extends StatelessWidget {
     final seconds = parts.length > 2 ? parts[2] : '';
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Text(
           title,
+          textAlign: TextAlign.center,
           style: TextStyle(
             fontSize: titleSize,
             fontWeight: FontWeight.w600,
@@ -654,19 +766,20 @@ class ClockBlock extends StatelessWidget {
         SizedBox(height: gap),
         Expanded(
           child: Align(
-            alignment: Alignment.centerLeft,
+            alignment: Alignment.center,
             child: FittedBox(
               fit: BoxFit.scaleDown,
-              alignment: Alignment.centerLeft,
+              alignment: Alignment.center,
               child: Transform.scale(
-                alignment: Alignment.centerLeft,
+                alignment: Alignment.center,
                 scaleX: 0.94,
                 scaleY: 1.12,
                 child: Text.rich(
+                  textAlign: TextAlign.center,
                   TextSpan(
                     style: TextStyle(
                       fontSize: timeSize,
-                      fontWeight: FontWeight.w300,
+                      fontWeight: boldTime ? FontWeight.w400 : FontWeight.w300,
                       height: 1,
                       letterSpacing: -1.2,
                     ),
@@ -1536,12 +1649,14 @@ class CalendarCard extends StatelessWidget {
     required this.onPrev,
     required this.onNext,
     required this.onHold,
+    this.compactMode = false,
   });
 
   final DateTime displayMonth;
   final VoidCallback onPrev;
   final VoidCallback onNext;
   final VoidCallback onHold;
+  final bool compactMode;
 
   @override
   Widget build(BuildContext context) {
@@ -1550,27 +1665,29 @@ class CalendarCard extends StatelessWidget {
     return GestureDetector(
       onTap: onHold,
       child: DashboardCard(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        padding: compactMode
+            ? const EdgeInsets.fromLTRB(6, 5, 6, 5)
+            : const EdgeInsets.fromLTRB(14, 12, 14, 12),
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final compact = constraints.maxHeight < 210;
-            final monthSize = compact ? 19.0 : 25.0;
-            final weekSize = compact ? 12.0 : 14.0;
-            final daySize = compact ? 17.0 : 19.0;
-            final sectionGap = compact ? 6.0 : 10.0;
-            final cellSize = compact ? 32.0 : 40.0;
+            final compact = compactMode || constraints.maxHeight < 210;
+            final monthSize = compactMode ? 22.0 : (compact ? 19.0 : 25.0);
+            final weekSize = compactMode ? 13.5 : (compact ? 12.0 : 14.0);
+            final daySize = compactMode ? 20.0 : (compact ? 17.0 : 19.0);
+            final sectionGap = compactMode ? 2.0 : (compact ? 6.0 : 10.0);
+            final cellSize = compactMode ? 40.0 : (compact ? 34.0 : 40.0);
             final iconPadding = compact ? EdgeInsets.zero : null;
-            final gridWidth = compact ? 286.0 : 312.0;
-            final gridHeight = compact ? 182.0 : 220.0;
 
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
+                Stack(
+                  alignment: Alignment.center,
                   children: [
-                    Expanded(
+                    Center(
                       child: Text(
                         monthYearLabel(displayMonth),
+                        textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: monthSize,
                           fontWeight: FontWeight.w700,
@@ -1578,81 +1695,78 @@ class CalendarCard extends StatelessWidget {
                         ),
                       ),
                     ),
-                    IconButton(
-                      onPressed: onPrev,
-                      icon: const Icon(Icons.chevron_left_rounded),
-                      color: Palette.textPrimary,
-                      visualDensity: VisualDensity.compact,
-                      padding: iconPadding,
-                      constraints: const BoxConstraints(
-                        minWidth: 28,
-                        minHeight: 28,
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: onNext,
-                      icon: const Icon(Icons.chevron_right_rounded),
-                      color: Palette.textPrimary,
-                      visualDensity: VisualDensity.compact,
-                      padding: iconPadding,
-                      constraints: const BoxConstraints(
-                        minWidth: 28,
-                        minHeight: 28,
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            onPressed: onPrev,
+                            icon: const Icon(Icons.chevron_left_rounded),
+                            color: Palette.textPrimary,
+                            visualDensity: VisualDensity.compact,
+                            padding: iconPadding,
+                            constraints: const BoxConstraints(
+                              minWidth: 28,
+                              minHeight: 28,
+                            ),
+                          ),
+                          IconButton(
+                            onPressed: onNext,
+                            icon: const Icon(Icons.chevron_right_rounded),
+                            color: Palette.textPrimary,
+                            visualDensity: VisualDensity.compact,
+                            padding: iconPadding,
+                            constraints: const BoxConstraints(
+                              minWidth: 28,
+                              minHeight: 28,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
                 ),
                 SizedBox(height: sectionGap),
                 Expanded(
-                  child: Align(
-                    alignment: Alignment.topCenter,
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      alignment: Alignment.topCenter,
-                      child: SizedBox(
-                        width: gridWidth,
-                        height: gridHeight,
+                  child: Column(
+                    children: [
+                      WeekdayHeader(fontSize: weekSize),
+                      SizedBox(height: compactMode ? 4 : (compact ? 2 : 6)),
+                      Expanded(
                         child: Column(
                           children: [
-                            WeekdayHeader(fontSize: weekSize),
-                            SizedBox(height: compact ? 2 : 6),
-                            Expanded(
-                              child: Column(
-                                children: [
-                                  for (final row in rows)
-                                    Expanded(
-                                      child: Row(
-                                        children: [
-                                          for (final day in row)
-                                            Expanded(
-                                              child: Center(
-                                                child: CalendarDayCell(
-                                                  day: day,
-                                                  isToday:
-                                                      day != null &&
-                                                      isSameDay(
-                                                        DateTime(
-                                                          displayMonth.year,
-                                                          displayMonth.month,
-                                                          day,
-                                                        ),
-                                                        DateTime.now(),
-                                                      ),
-                                                  fontSize: daySize,
-                                                  cellSize: cellSize,
+                            for (final row in rows)
+                              Expanded(
+                                child: Row(
+                                  children: [
+                                    for (final day in row)
+                                      Expanded(
+                                        child: Center(
+                                          child: CalendarDayCell(
+                                            day: day,
+                                            isToday:
+                                                day != null &&
+                                                isSameDay(
+                                                  DateTime(
+                                                    displayMonth.year,
+                                                    displayMonth.month,
+                                                    day,
+                                                  ),
+                                                  DateTime.now(),
                                                 ),
-                                              ),
-                                            ),
-                                        ],
+                                            fontSize: daySize,
+                                            cellSize: cellSize,
+                                          ),
+                                        ),
                                       ),
-                                    ),
-                                ],
+                                  ],
+                                ),
                               ),
-                            ),
                           ],
                         ),
                       ),
-                    ),
+                    ],
                   ),
                 ),
               ],
@@ -2267,8 +2381,10 @@ class _TimelineEventCard extends StatelessWidget {
               ),
               child: Padding(
                 padding: EdgeInsets.symmetric(
-                  horizontal: short ? 5 : 8,
-                  vertical: ultraTiny ? 1 : (micro ? 1.5 : (short ? 2 : 4)),
+                  horizontal: ultraTiny
+                      ? 4
+                      : (micro ? 4 : (short ? 4.5 : 6)),
+                  vertical: ultraTiny ? 0 : (micro ? 0 : (short ? 0.5 : 1)),
                 ),
                 child: DefaultTextStyle(
                   style: const TextStyle(color: Colors.white),
@@ -2280,8 +2396,8 @@ class _TimelineEventCard extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              fontSize: 8,
-                              fontWeight: FontWeight.w700,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
                               height: 1,
                             ),
                           ),
@@ -2296,23 +2412,31 @@ class _TimelineEventCard extends StatelessWidget {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
-                                  fontSize: 8.5,
-                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13.5,
+                                  fontWeight: FontWeight.w900,
                                   height: 1,
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 4),
-                            Text(
-                              timelineTimeRangeLabel(event),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              textAlign: TextAlign.right,
-                              style: TextStyle(
-                                fontSize: 6,
-                                fontWeight: FontWeight.w600,
-                                color: accent.withValues(alpha: 0.95),
-                                height: 1,
+                            const SizedBox(width: 3),
+                            Flexible(
+                              child: Align(
+                                alignment: Alignment.centerRight,
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    timelineTimeRangeLabel(event),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    textAlign: TextAlign.right,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: accent.withValues(alpha: 0.95),
+                                      height: 1,
+                                    ),
+                                  ),
+                                ),
                               ),
                             ),
                           ],
@@ -2327,23 +2451,31 @@ class _TimelineEventCard extends StatelessWidget {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
-                                  fontSize: 9.5,
-                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w900,
                                   height: 1,
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 5),
-                            Text(
-                              timelineTimeRangeLabel(event),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              textAlign: TextAlign.right,
-                              style: TextStyle(
-                                fontSize: 6.75,
-                                fontWeight: FontWeight.w600,
-                                color: accent.withValues(alpha: 0.95),
-                                height: 1,
+                            const SizedBox(width: 3),
+                            Flexible(
+                              child: Align(
+                                alignment: Alignment.centerRight,
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    timelineTimeRangeLabel(event),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    textAlign: TextAlign.right,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: accent.withValues(alpha: 0.95),
+                                      height: 1,
+                                    ),
+                                  ),
+                                ),
                               ),
                             ),
                           ],
@@ -2359,26 +2491,31 @@ class _TimelineEventCard extends StatelessWidget {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
-                                    fontSize: short ? 12 : 15,
-                                    fontWeight: FontWeight.w700,
+                                    fontSize: short ? 18 : 21,
+                                    fontWeight: FontWeight.w900,
                                     height: 1,
                                   ),
                                 ),
                               ),
                             ),
-                            SizedBox(width: compact ? 6 : 10),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: Text(
-                                timelineTimeRangeLabel(event),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                textAlign: TextAlign.right,
-                                style: TextStyle(
-                                  fontSize: compact ? 8 : 10,
-                                  fontWeight: FontWeight.w600,
-                                  color: accent.withValues(alpha: 0.95),
-                                  height: 1,
+                            SizedBox(width: compact ? 3 : 6),
+                            Flexible(
+                              child: Align(
+                                alignment: Alignment.centerRight,
+                                child: FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  child: Text(
+                                    timelineTimeRangeLabel(event),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    textAlign: TextAlign.right,
+                                    style: TextStyle(
+                                      fontSize: short ? 15 : 17.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: accent.withValues(alpha: 0.95),
+                                      height: 1,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
@@ -2435,52 +2572,61 @@ class EventsCard extends StatelessWidget {
     required this.onHold,
     required this.onRefresh,
     required this.refreshToken,
+    this.compactMode = false,
   });
 
   final List<CalendarEvent> events;
   final VoidCallback onHold;
   final Future<void> Function() onRefresh;
   final int refreshToken;
+  final bool compactMode;
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onHold,
       child: DashboardCard(
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+        padding: compactMode
+            ? const EdgeInsets.fromLTRB(4, 4, 4, 3)
+            : const EdgeInsets.fromLTRB(10, 10, 10, 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
+            Stack(
+              alignment: Alignment.center,
               children: [
-                const Expanded(
+                Center(
                   child: Text(
                     'Meetings',
+                    textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
+                      fontSize: compactMode ? 19 : 18,
+                      fontWeight: FontWeight.w700,
                       color: Palette.textSubtle,
                     ),
                   ),
                 ),
-                IconButton(
-                  onPressed: () async {
-                    await onRefresh();
-                  },
-                  icon: const Icon(Icons.refresh_rounded),
-                  iconSize: 18,
-                  padding: EdgeInsets.zero,
-                  visualDensity: VisualDensity.compact,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 28,
-                    height: 28,
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: IconButton(
+                    onPressed: () async {
+                      await onRefresh();
+                    },
+                    icon: const Icon(Icons.refresh_rounded),
+                    iconSize: compactMode ? 17 : 18,
+                    padding: EdgeInsets.zero,
+                    visualDensity: VisualDensity.compact,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 28,
+                      height: 28,
+                    ),
+                    color: Palette.textSubtle,
+                    tooltip: 'Refresh meetings',
                   ),
-                  color: Palette.textSubtle,
-                  tooltip: 'Refresh meetings',
                 ),
               ],
             ),
-            const SizedBox(height: 8),
+            SizedBox(height: compactMode ? 2 : 8),
             Expanded(
               child: events.isEmpty
                   ? Center(
@@ -2542,8 +2688,9 @@ class _MiniMeetingsTimelineState extends State<MiniMeetingsTimeline> {
 
     _lastAutoScrollKey = key;
     final maxScroll = math.max(0.0, contentHeight - viewportHeight);
+    final topAnchor = math.max(20.0, viewportHeight * 0.18);
     final target = (((focusMinute - rangeStart) * pixelsPerMinute) -
-            (viewportHeight / 2))
+            topAnchor)
         .clamp(0.0, maxScroll);
     final distance = (_scrollController.offset - target).abs();
     final durationMs = distance < 32
@@ -2566,6 +2713,8 @@ class _MiniMeetingsTimelineState extends State<MiniMeetingsTimeline> {
     final dayDate = DateTime(seed.year, seed.month, seed.day);
     final dayEvents = eventsForDay(widget.events, dayDate);
     final items = timelineItemsForDay(dayEvents, dayDate);
+    final now = DateTime.now();
+    final currentMinute = (now.hour * 60) + now.minute;
 
     if (items.isEmpty) {
       return Center(
@@ -2579,23 +2728,37 @@ class _MiniMeetingsTimelineState extends State<MiniMeetingsTimeline> {
       );
     }
 
+    final hasMeetingAfterNow =
+        !isSameDay(dayDate, now) ||
+        items.any((item) => item.endMinute > currentMinute);
+    if (!hasMeetingAfterNow) {
+      return Center(
+        child: Text(
+          'No meetings',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: Colors.white.withValues(alpha: 0.7),
+          ),
+        ),
+      );
+    }
+
     final firstStart = items
         .map((item) => item.startMinute)
         .reduce(math.min);
     final lastEnd = items.map((item) => item.endMinute).reduce(math.max);
-    final rangeStart = math.max(0, ((firstStart - 15) ~/ 30) * 30);
+    final rangeStart = math.max(0, ((firstStart - 5) ~/ 30) * 30);
     final rangeEnd = math.min(
       24 * 60,
-      (((lastEnd + 15) + 29) ~/ 30) * 30,
+      (((lastEnd + 5) + 29) ~/ 30) * 30,
     );
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        const leftPad = 38.0;
-        const rightPad = 2.0;
-        const horizontalGap = 6.0;
-        final now = DateTime.now();
-        final currentMinute = (now.hour * 60) + now.minute;
+        const leftPad = 24.0;
+        const rightPad = 1.0;
+        const horizontalGap = 4.0;
         final showCurrentTimeLine =
             isSameDay(dayDate, now) &&
             currentMinute >= rangeStart &&
@@ -2603,8 +2766,8 @@ class _MiniMeetingsTimelineState extends State<MiniMeetingsTimeline> {
         final timelineWidth = constraints.maxWidth - leftPad - rightPad;
         final totalMinutes = math.max(60, rangeEnd - rangeStart);
         final pixelsPerMinute = math.max(
-          1.35,
-          (constraints.maxHeight - 4) / totalMinutes,
+          1.55,
+          (constraints.maxHeight - 2) / totalMinutes,
         );
         final contentHeight = totalMinutes * pixelsPerMinute;
         final focusMinute = showCurrentTimeLine ? currentMinute : firstStart;
@@ -2668,14 +2831,14 @@ class _MiniMeetingsTimelineState extends State<MiniMeetingsTimeline> {
                     if (minute % 60 == 0)
                       Positioned(
                         left: 0,
-                        width: leftPad - 8,
-                        top: ((minute - rangeStart) * pixelsPerMinute) - 8,
+                        width: leftPad - 2,
+                        top: ((minute - rangeStart) * pixelsPerMinute) - 7,
                         child: Text(
-                          minuteOfDayLabel(minute),
+                          compactHourLabel(minute),
                           textAlign: TextAlign.right,
                           style: TextStyle(
                             fontSize: 10,
-                            fontWeight: FontWeight.w600,
+                            fontWeight: FontWeight.w700,
                             color: Palette.textSubtle,
                           ),
                         ),
@@ -2688,13 +2851,13 @@ class _MiniMeetingsTimelineState extends State<MiniMeetingsTimeline> {
                           (horizontalGap / 2),
                       top:
                           ((item.startMinute - rangeStart) * pixelsPerMinute) +
-                          3,
+                          2,
                       width:
                           (timelineWidth / item.totalColumns) - horizontalGap,
                       height: math.max(
-                        18,
+                        26,
                         ((item.endMinute - item.startMinute) * pixelsPerMinute) -
-                            6,
+                            4,
                       ),
                       child: _TimelineEventCard(event: item.event),
                     ),
@@ -2922,7 +3085,7 @@ class GaugePainter extends CustomPainter {
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.5);
     final needlePaint = Paint()
       ..isAntiAlias = true
-      ..color = const Color(0xFFDCE7F2)
+      ..color = const Color(0xFFFF4D4D)
       ..strokeWidth = 3.2
       ..strokeCap = StrokeCap.round;
     canvas.drawLine(
@@ -3994,6 +4157,11 @@ String minuteOfDayLabel(int minute) {
   final mins = minute % 60;
   return '${hour.toString().padLeft(2, '0')}:'
       '${mins.toString().padLeft(2, '0')}';
+}
+
+String compactHourLabel(int minute) {
+  final hour = (minute ~/ 60).clamp(0, 23);
+  return '$hour';
 }
 
 List<DashboardMeetingGroup> dashboardMeetingGroups(List<CalendarEvent> events) {
