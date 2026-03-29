@@ -456,13 +456,6 @@ class AnimatedGauge extends StatelessWidget {
                                   color: Palette.textPrimary,
                                   height: 1,
                                   letterSpacing: -1.2,
-                                  shadows: const [
-                                    Shadow(
-                                      color: Colors.black54,
-                                      blurRadius: 16,
-                                      offset: Offset(0, 4),
-                                    ),
-                                  ],
                                 ),
                               ),
                               TextSpan(
@@ -2807,15 +2800,20 @@ class GaugePainter extends CustomPainter {
       ..color = Palette.surfaceRaised;
     final frameInnerPaint = Paint()
       ..isAntiAlias = true
-      ..color = Palette.surface;
+      ..color = const Color(0xFF0D131D);
     final frameStrokePaint = Paint()
       ..isAntiAlias = true
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1
-      ..color = Colors.white.withValues(alpha: 0.04);
+      ..color = Colors.white.withValues(alpha: 0.08);
+    final dialStrokePaint = Paint()
+      ..isAntiAlias = true
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.8
+      ..color = Colors.white.withValues(alpha: 0.05);
     final dialPaint = Paint()
       ..isAntiAlias = true
-      ..color = Palette.surfaceRaised;
+      ..color = const Color(0xFF070B12);
 
     canvas.save();
     canvas.clipRRect(bezelRect);
@@ -2823,6 +2821,7 @@ class GaugePainter extends CustomPainter {
     canvas.drawRRect(bezelRect, frameStrokePaint);
     canvas.drawRRect(dialRect, frameInnerPaint);
     canvas.drawRRect(dialRect.deflate(2), dialPaint);
+    canvas.drawRRect(dialRect.deflate(2), dialStrokePaint);
 
     final center = Offset(size.width / 2, size.height * 0.86);
     final radius = math.min(size.width * 0.42, size.height * 0.62);
@@ -2834,30 +2833,30 @@ class GaugePainter extends CustomPainter {
     final trackPaint = Paint()
       ..isAntiAlias = true
       ..color = Palette.gaugeTrack.withValues(alpha: 0.95)
-      ..strokeWidth = 12
+      ..strokeWidth = 11
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
     final progressGlowPaint = Paint()
       ..isAntiAlias = true
-      ..color = progressColor.withValues(alpha: 0.26)
-      ..strokeWidth = 16
+      ..color = progressColor.withValues(alpha: 0.14)
+      ..strokeWidth = 14
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
     final progressPaint = Paint()
       ..isAntiAlias = true
       ..color = progressColor
-      ..strokeWidth = 13
+      ..strokeWidth = 12
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
     final tickPaint = Paint()
       ..isAntiAlias = true
-      ..color = const Color(0xFFB9D7E5).withValues(alpha: 0.78)
-      ..strokeWidth = 1.4;
+      ..color = const Color(0xFFE2F0FA).withValues(alpha: 0.88)
+      ..strokeWidth = 1.2;
     final minorTickPaint = Paint()
       ..isAntiAlias = true
-      ..color = const Color(0xFFB9D7E5).withValues(alpha: 0.55)
-      ..strokeWidth = 1;
+      ..color = const Color(0xFFCFE1EE).withValues(alpha: 0.62)
+      ..strokeWidth = 0.9;
 
     canvas.drawArc(arcRect, startAngle, sweepAngle, false, trackPaint);
     if (value > 0) {
@@ -2917,14 +2916,14 @@ class GaugePainter extends CustomPainter {
     );
     final needleShadowPaint = Paint()
       ..isAntiAlias = true
-      ..color = Colors.black.withValues(alpha: 0.34)
-      ..strokeWidth = 6
+      ..color = Colors.black.withValues(alpha: 0.22)
+      ..strokeWidth = 4.5
       ..strokeCap = StrokeCap.round
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 1.5);
     final needlePaint = Paint()
       ..isAntiAlias = true
       ..color = const Color(0xFFDCE7F2)
-      ..strokeWidth = 4
+      ..strokeWidth = 3.2
       ..strokeCap = StrokeCap.round;
     canvas.drawLine(
       needleBase.translate(1.5, 2),
@@ -2948,15 +2947,15 @@ class GaugePainter extends CustomPainter {
 
     canvas.drawCircle(
       center.translate(0, 2),
-      10,
+      8.5,
       Paint()..color = Colors.black.withValues(alpha: 0.32),
     );
     canvas.drawCircle(
       center,
-      10,
-      Paint()..color = const Color(0xFF96A3B2),
+      8.5,
+      Paint()..color = const Color(0xFFA8B5C3),
     );
-    canvas.drawCircle(center, 3.5, Paint()..color = const Color(0xFFF4F7FB));
+    canvas.drawCircle(center, 3, Paint()..color = const Color(0xFFF7FAFD));
     canvas.restore();
   }
 
