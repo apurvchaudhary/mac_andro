@@ -3,8 +3,11 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 const String kDefaultBaseUrl = 'http://192.168.1.49:8001';
 const Duration kPollInterval = Duration(seconds: 2);
@@ -14,8 +17,13 @@ const String kClockConfigsPrefKey = 'clock_configs_v1';
 const String kApiBaseUrlPrefKey = 'api_base_url_v1';
 const String kAvailabilitySettingsPrefKey = 'availability_settings_v1';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await SystemChrome.setPreferredOrientations(const [
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
+  ]);
+  await WakelockPlus.enable();
   runApp(const DashboardApp());
 }
 
@@ -50,11 +58,9 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   late final DashboardApi _api;
-  Timer? _clockTimer;
   Timer? _pollTimer;
 
   DashboardSnapshot _snapshot = DashboardSnapshot.empty();
-  DateTime _nowUtc = DateTime.now().toUtc();
   DateTime _displayMonth = monthStart(DateTime.now());
   String _baseUrl = kDefaultBaseUrl;
   List<ClockConfig> _clockConfigs = const [
@@ -70,21 +76,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _api = DashboardApi(_baseUrl);
     _loadClockConfigs();
     _loadApiSettings();
-    _clockTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _nowUtc = DateTime.now().toUtc();
-      });
-    });
     _refreshStats();
     _pollTimer = Timer.periodic(kPollInterval, (_) => _refreshStats());
   }
 
   @override
   void dispose() {
-    _clockTimer?.cancel();
     _pollTimer?.cancel();
     _api.dispose();
     super.dispose();
@@ -99,6 +96,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     try {
       final snapshot = await _api.fetchStats();
       if (!mounted) {
+        return;
+      }
+      if (snapshot == _snapshot) {
         return;
       }
       setState(() {
@@ -177,7 +177,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final prefs = await SharedPreferences.getInstance();
       final rawItems = prefs.getStringList(kClockConfigsPrefKey);
       final parsed = parseClockConfigs(rawItems);
-      if (!mounted || parsed == null) {
+      if (!mounted || parsed == null || listEquals(parsed, _clockConfigs)) {
         return;
       }
       setState(() {
@@ -204,7 +204,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       final savedUrl = prefs.getString(kApiBaseUrlPrefKey);
-      if (!mounted || savedUrl == null || !isValidBaseUrl(savedUrl)) {
+      if (!mounted ||
+          savedUrl == null ||
+          !isValidBaseUrl(savedUrl) ||
+          savedUrl == _baseUrl) {
         return;
       }
       _api.setBaseUrl(savedUrl);
@@ -311,7 +314,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         children: [
                           Expanded(
                             child: ClocksCard(
-                              nowUtc: _nowUtc,
                               clockConfigs: _clockConfigs,
                               onHold: _openClockSettings,
                             ),
@@ -367,7 +369,7 @@ class GaugeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onLongPress: onHold,
+      onTap: onHold,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(20),
         child: RepaintBoundary(
@@ -489,27 +491,52 @@ class AnimatedGauge extends StatelessWidget {
   }
 }
 
-class ClocksCard extends StatelessWidget {
+class ClocksCard extends StatefulWidget {
   const ClocksCard({
     super.key,
-    required this.nowUtc,
     required this.clockConfigs,
     required this.onHold,
   });
 
-  final DateTime nowUtc;
   final List<ClockConfig> clockConfigs;
   final VoidCallback onHold;
 
   @override
+  State<ClocksCard> createState() => _ClocksCardState();
+}
+
+class _ClocksCardState extends State<ClocksCard> {
+  Timer? _timer;
+  DateTime _nowUtc = DateTime.now().toUtc();
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _nowUtc = DateTime.now().toUtc();
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onLongPress: onHold,
+      onTap: widget.onHold,
       child: DashboardCard(
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final count = clockConfigs.length.clamp(1, 4);
+            final count = widget.clockConfigs.length.clamp(1, 4);
             final compact = constraints.maxHeight < 210;
             final stacked = count <= 2;
 
@@ -521,12 +548,12 @@ class ClocksCard extends StatelessWidget {
                 : (compact ? 30.0 : 40.0);
             final gap = stacked ? (compact ? 4.0 : 8.0) : 4.0;
 
-            final displays = clockConfigs
+            final displays = widget.clockConfigs
                 .map(
                   (config) => ClockDisplayData(
                     title: clockZoneLabel(config.zoneId),
                     color: clockColor(config.colorId),
-                    time: timeLabel(clockTimeForZone(config.zoneId, nowUtc)),
+                    time: timeLabel(clockTimeForZone(config.zoneId, _nowUtc)),
                   ),
                 )
                 .toList();
@@ -708,113 +735,259 @@ class _ClockSettingsDialogState extends State<ClockSettingsDialog> {
     );
   }
 
+  Widget _buildColorOption({
+    required Color color,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOut,
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: selected
+                ? Colors.white.withValues(alpha: 0.85)
+                : Colors.white.withValues(alpha: 0.12),
+            width: selected ? 1.6 : 1,
+          ),
+        ),
+        child: ColorSwatchDot(color: color, size: 20),
+      ),
+    );
+  }
+
+  Widget _buildClockEditor(int index, DateTime nowUtc) {
+    final config = _configs[index];
+    final zoneLabel = clockZoneLabel(config.zoneId);
+    final accent = clockColor(config.colorId);
+    final previewTime = timeLabel(clockTimeForZone(config.zoneId, nowUtc));
+    final offsetLabel = clockUtcOffsetLabel(config.zoneId, nowUtc);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Palette.surface,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Clock ${index + 1}',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: Palette.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      zoneLabel,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: accent,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: accent,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              previewTime,
+              style: TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.w300,
+                letterSpacing: -1.2,
+                color: Palette.textPrimary,
+                height: 1,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _InfoChip(label: offsetLabel),
+              _InfoChip(label: clockColorLabel(config.colorId)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            initialValue: config.zoneId,
+            isExpanded: true,
+            menuMaxHeight: 360,
+            decoration: const InputDecoration(
+              labelText: 'Time zone',
+              border: OutlineInputBorder(),
+              isDense: true,
+            ),
+            dropdownColor: Palette.surface,
+            items: clockZones
+                .map(
+                  (zone) => DropdownMenuItem<String>(
+                    value: zone.id,
+                    child: Text(zone.label),
+                  ),
+                )
+                .toList(),
+            onChanged: (value) {
+              if (value == null) {
+                return;
+              }
+              setState(() {
+                _configs[index] = _configs[index].copyWith(zoneId: value);
+              });
+            },
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Color',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: Colors.white.withValues(alpha: 0.72),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: clockColors.entries
+                .map(
+                  (entry) => _buildColorOption(
+                    color: entry.value,
+                    selected: entry.key == config.colorId,
+                    onTap: () {
+                      setState(() {
+                        _configs[index] = _configs[index].copyWith(
+                          colorId: entry.key,
+                        );
+                      });
+                    },
+                  ),
+                )
+                .toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final nowUtc = DateTime.now().toUtc();
+
     return AlertDialog(
       backgroundColor: Palette.surfaceRaised,
-      title: const Text('Clock Settings'),
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('Clock Settings'),
+          const SizedBox(height: 6),
+          Text(
+            'Configure how many clocks appear on the dashboard, preview each zone, and pick colors directly.',
+            style: TextStyle(
+              fontSize: 13,
+              color: Colors.white.withValues(alpha: 0.68),
+              fontWeight: FontWeight.w400,
+            ),
+          ),
+        ],
+      ),
       content: SizedBox(
-        width: 460,
+        width: 560,
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  const Text('Number of clocks'),
-                  const SizedBox(width: 12),
-                  DropdownButton<int>(
-                    value: _count,
-                    dropdownColor: Palette.surface,
-                    items: const [1, 2, 3, 4]
-                        .map(
-                          (count) => DropdownMenuItem<int>(
-                            value: count,
-                            child: Text('$count'),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Palette.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Number of clocks',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: Palette.textSubtle,
+                            ),
                           ),
-                        )
-                        .toList(),
-                    onChanged: (value) {
-                      if (value == null) {
-                        return;
-                      }
-                      setState(() {
-                        _count = value;
-                      });
-                    },
-                  ),
-                ],
+                          const SizedBox(height: 4),
+                          Text(
+                            'Show between 1 and 4 time zones on the dashboard.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.white.withValues(alpha: 0.64),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    DropdownButton<int>(
+                      value: _count,
+                      dropdownColor: Palette.surface,
+                      items: const [1, 2, 3, 4]
+                          .map(
+                            (count) => DropdownMenuItem<int>(
+                              value: count,
+                              child: Text('$count'),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value == null) {
+                          return;
+                        }
+                        setState(() {
+                          _count = value;
+                        });
+                      },
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 16),
               for (var index = 0; index < _count; index++) ...[
-                Text(
-                  'Clock ${index + 1}',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                DropdownButtonFormField<String>(
-                  initialValue: _configs[index].zoneId,
-                  isExpanded: true,
-                  menuMaxHeight: 360,
-                  decoration: const InputDecoration(
-                    labelText: 'Time zone',
-                    border: OutlineInputBorder(),
-                  ),
-                  dropdownColor: Palette.surface,
-                  items: clockZones
-                      .map(
-                        (zone) => DropdownMenuItem<String>(
-                          value: zone.id,
-                          child: Text(zone.label),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    if (value == null) {
-                      return;
-                    }
-                    setState(() {
-                      _configs[index] = _configs[index].copyWith(zoneId: value);
-                    });
-                  },
-                ),
-                const SizedBox(height: 8),
-                DropdownButtonFormField<String>(
-                  initialValue: _configs[index].colorId,
-                  isExpanded: true,
-                  menuMaxHeight: 280,
-                  decoration: const InputDecoration(
-                    labelText: 'Color',
-                    border: OutlineInputBorder(),
-                  ),
-                  dropdownColor: Palette.surface,
-                  items: clockColors.entries
-                      .map(
-                        (entry) => DropdownMenuItem<String>(
-                          value: entry.key,
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: ColorSwatchDot(color: entry.value),
-                          ),
-                        ),
-                      )
-                      .toList(),
-                  onChanged: (value) {
-                    if (value == null) {
-                      return;
-                    }
-                    setState(() {
-                      _configs[index] = _configs[index].copyWith(
-                        colorId: value,
-                      );
-                    });
-                  },
-                ),
-                const SizedBox(height: 16),
+                _buildClockEditor(index, nowUtc),
+                if (index != _count - 1) const SizedBox(height: 14),
               ],
             ],
           ),
@@ -837,9 +1010,10 @@ class _ClockSettingsDialogState extends State<ClockSettingsDialog> {
 }
 
 class ColorSwatchDot extends StatelessWidget {
-  const ColorSwatchDot({super.key, required this.color});
+  const ColorSwatchDot({super.key, required this.color, this.size = 22});
 
   final Color color;
+  final double size;
 
   @override
   Widget build(BuildContext context) {
@@ -847,8 +1021,8 @@ class ColorSwatchDot extends StatelessWidget {
         color.computeLuminance() > 0.82 || color == Palette.textPrimary;
 
     return Container(
-      width: 22,
-      height: 22,
+      width: size,
+      height: size,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: color,
@@ -865,6 +1039,32 @@ class ColorSwatchDot extends StatelessWidget {
             offset: const Offset(0, 2),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _InfoChip extends StatelessWidget {
+  const _InfoChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: Colors.white.withValues(alpha: 0.78),
+        ),
       ),
     );
   }
@@ -909,6 +1109,8 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final viewInsets = MediaQuery.of(context).viewInsets;
+
     return Scaffold(
       backgroundColor: Palette.background,
       appBar: AppBar(
@@ -917,87 +1119,100 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
         title: const Text('Data Source Settings'),
       ),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              DashboardCard(
-                padding: const EdgeInsets.all(18),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            return SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: EdgeInsets.fromLTRB(
+                20,
+                20,
+                20,
+                20 + viewInsets.bottom,
+              ),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'Base URL',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: Palette.textPrimary,
+                    DashboardCard(
+                      padding: const EdgeInsets.all(18),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Base URL',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: Palette.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Used for gauges, meetings, and calendar day details. The app reads /stats and /events from this address.',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.white.withValues(alpha: 0.72),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          TextField(
+                            controller: _baseUrlController,
+                            keyboardType: TextInputType.url,
+                            autofocus: true,
+                            decoration: InputDecoration(
+                              labelText: 'Server URL',
+                              hintText: 'http://192.168.1.49:8001',
+                              errorText: _errorText,
+                              border: const OutlineInputBorder(),
+                            ),
+                            onChanged: (_) {
+                              setState(() {
+                                _errorText = null;
+                              });
+                            },
+                            onSubmitted: (_) => _save(),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Example endpoint: ${sanitizeBaseUrl(_baseUrlController.text.isEmpty ? widget.initialBaseUrl : _baseUrlController.text)}/stats',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.white.withValues(alpha: 0.6),
+                            ),
+                          ),
+                          const SizedBox(height: 18),
+                          Row(
+                            children: [
+                              OutlinedButton(
+                                onPressed: () {
+                                  _baseUrlController.text = kDefaultBaseUrl;
+                                  setState(() {
+                                    _errorText = null;
+                                  });
+                                },
+                                child: const Text('Reset Default'),
+                              ),
+                              const Spacer(),
+                              TextButton(
+                                onPressed: () => Navigator.of(context).pop(),
+                                child: const Text('Cancel'),
+                              ),
+                              const SizedBox(width: 8),
+                              FilledButton(
+                                onPressed: _save,
+                                child: const Text('Save'),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Used for gauges, meetings, and calendar day details. The app reads /stats and /events from this address.',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.white.withValues(alpha: 0.72),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: _baseUrlController,
-                      keyboardType: TextInputType.url,
-                      autofocus: true,
-                      decoration: InputDecoration(
-                        labelText: 'Server URL',
-                        hintText: 'http://192.168.1.49:8001',
-                        errorText: _errorText,
-                        border: const OutlineInputBorder(),
-                      ),
-                      onChanged: (_) {
-                        setState(() {
-                          _errorText = null;
-                        });
-                      },
-                      onSubmitted: (_) => _save(),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Example endpoint: ${sanitizeBaseUrl(_baseUrlController.text.isEmpty ? widget.initialBaseUrl : _baseUrlController.text)}/stats',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.white.withValues(alpha: 0.6),
-                      ),
-                    ),
-                    const SizedBox(height: 18),
-                    Row(
-                      children: [
-                        OutlinedButton(
-                          onPressed: () {
-                            _baseUrlController.text = kDefaultBaseUrl;
-                            setState(() {
-                              _errorText = null;
-                            });
-                          },
-                          child: const Text('Reset Default'),
-                        ),
-                        const Spacer(),
-                        TextButton(
-                          onPressed: () => Navigator.of(context).pop(),
-                          child: const Text('Cancel'),
-                        ),
-                        const SizedBox(width: 8),
-                        FilledButton(
-                          onPressed: _save,
-                          child: const Text('Save'),
-                        ),
-                      ],
                     ),
                   ],
                 ),
               ),
-            ],
-          ),
+            );
+          },
         ),
       ),
     );
@@ -1340,7 +1555,7 @@ class CalendarCard extends StatelessWidget {
     final rows = monthRows(displayMonth);
 
     return GestureDetector(
-      onLongPress: onHold,
+      onTap: onHold,
       child: DashboardCard(
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
         child: LayoutBuilder(
@@ -1925,12 +2140,13 @@ class _DayTimelineState extends State<DayTimeline> {
           );
         });
 
-        return SingleChildScrollView(
-          controller: _scrollController,
-          child: SizedBox(
-            height: contentHeight,
-            child: Stack(
-              children: [
+        return RepaintBoundary(
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            child: SizedBox(
+              height: contentHeight,
+              child: Stack(
+                children: [
                 for (var hour = 0; hour <= 24; hour++)
                   Positioned(
                     left: leftPad,
@@ -2014,7 +2230,8 @@ class _DayTimelineState extends State<DayTimeline> {
                     ),
                     child: _TimelineEventCard(event: item.event),
                   ),
-              ],
+                ],
+              ),
             ),
           ),
         );
@@ -2235,7 +2452,7 @@ class EventsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onLongPress: onHold,
+      onTap: onHold,
       child: DashboardCard(
         padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
         child: Column(
@@ -2415,14 +2632,15 @@ class _MiniMeetingsTimelineState extends State<MiniMeetingsTimeline> {
           );
         });
 
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: SingleChildScrollView(
-            controller: _scrollController,
-            child: SizedBox(
-              height: contentHeight,
-              child: Stack(
-                children: [
+        return RepaintBoundary(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: SingleChildScrollView(
+              controller: _scrollController,
+              child: SizedBox(
+                height: contentHeight,
+                child: Stack(
+                  children: [
                   for (
                     var minute = rangeStart;
                     minute <= rangeEnd;
@@ -2516,7 +2734,8 @@ class _MiniMeetingsTimelineState extends State<MiniMeetingsTimeline> {
                         ),
                       ),
                     ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -2540,26 +2759,28 @@ class DashboardCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Palette.surfaceRaised, Palette.surface],
-        ),
-        border: showBorder
-            ? Border.all(color: Colors.white.withValues(alpha: 0.08))
-            : null,
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black54,
-            blurRadius: 20,
-            offset: Offset(0, 12),
+    return RepaintBoundary(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(24),
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Palette.surfaceRaised, Palette.surface],
           ),
-        ],
+          border: showBorder
+              ? Border.all(color: Colors.white.withValues(alpha: 0.08))
+              : null,
+          boxShadow: const [
+            BoxShadow(
+              color: Colors.black54,
+              blurRadius: 20,
+              offset: Offset(0, 12),
+            ),
+          ],
+        ),
+        child: Padding(padding: padding, child: child),
       ),
-      child: Padding(padding: padding, child: child),
     );
   }
 }
@@ -2667,11 +2888,6 @@ class GaugePainter extends CustomPainter {
       canvas.drawLine(p1, p2, major ? tickPaint : minorTickPaint);
     }
 
-    const numberStyle = TextStyle(
-      fontSize: 11,
-      fontWeight: FontWeight.w600,
-      color: Color(0xFFD8E1EC),
-    );
     for (var i = 0; i <= 5; i++) {
       final t = i / 5;
       final angle = startAngle + (sweepAngle * t);
@@ -2680,10 +2896,7 @@ class GaugePainter extends CustomPainter {
         center.dx + labelRadius * math.cos(angle),
         center.dy + labelRadius * math.sin(angle),
       );
-      final painter = TextPainter(
-        text: TextSpan(text: '${i * 2}', style: numberStyle),
-        textDirection: TextDirection.ltr,
-      )..layout();
+      final painter = kGaugeNumberPainters[i];
       painter.paint(
         canvas,
         Offset(
@@ -2859,6 +3072,28 @@ class DashboardSnapshot {
       events: [],
     );
   }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) {
+      return true;
+    }
+    return other is DashboardSnapshot &&
+        other.cpu == cpu &&
+        other.mem == mem &&
+        other.net == net &&
+        other.power == power &&
+        listEquals(other.events, events);
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    cpu,
+    mem,
+    net,
+    power,
+    Object.hashAll(events),
+  );
 }
 
 class ClockConfig {
@@ -2889,6 +3124,19 @@ class ClockConfig {
     }
     return ClockConfig(zoneId: zoneId, colorId: colorId);
   }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) {
+      return true;
+    }
+    return other is ClockConfig &&
+        other.zoneId == zoneId &&
+        other.colorId == colorId;
+  }
+
+  @override
+  int get hashCode => Object.hash(zoneId, colorId);
 }
 
 class AvailabilitySettings {
@@ -2958,6 +3206,26 @@ class AvailabilitySettings {
       minimumSlotMinutes: minimum,
     );
   }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) {
+      return true;
+    }
+    return other is AvailabilitySettings &&
+        other.enabled == enabled &&
+        other.workStartMinute == workStartMinute &&
+        other.workEndMinute == workEndMinute &&
+        other.minimumSlotMinutes == minimumSlotMinutes;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    enabled,
+    workStartMinute,
+    workEndMinute,
+    minimumSlotMinutes,
+  );
 }
 
 class ClockZoneOption {
@@ -3072,6 +3340,21 @@ class CalendarEvent {
       end: parseIsoToLocal(json['to']),
     );
   }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) {
+      return true;
+    }
+    return other is CalendarEvent &&
+        other.title == title &&
+        other.location == location &&
+        other.start == start &&
+        other.end == end;
+  }
+
+  @override
+  int get hashCode => Object.hash(title, location, start, end);
 }
 
 class DashboardMeetingGroup {
@@ -3153,6 +3436,21 @@ const List<String> shortWeekdays = [
   'Sat',
   'Sun',
 ];
+
+final List<TextPainter> kGaugeNumberPainters = List<TextPainter>.generate(
+  6,
+  (index) => TextPainter(
+    text: TextSpan(
+      text: '${index * 2}',
+      style: const TextStyle(
+        fontSize: 11,
+        fontWeight: FontWeight.w600,
+        color: Color(0xFFD8E1EC),
+      ),
+    ),
+    textDirection: TextDirection.ltr,
+  )..layout(),
+);
 
 double parseDouble(dynamic value) {
   if (value is num) {
@@ -3636,6 +3934,17 @@ String clockColorLabel(String colorId) {
     default:
       return 'White';
   }
+}
+
+String clockUtcOffsetLabel(String zoneId, DateTime utc) {
+  final zoneTime = clockTimeForZone(zoneId, utc);
+  final difference = zoneTime.difference(utc);
+  final totalMinutes = difference.inMinutes;
+  final sign = totalMinutes >= 0 ? '+' : '-';
+  final absMinutes = totalMinutes.abs();
+  final hours = (absMinutes ~/ 60).toString().padLeft(2, '0');
+  final minutes = (absMinutes % 60).toString().padLeft(2, '0');
+  return 'UTC$sign$hours:$minutes';
 }
 
 DateTime clockTimeForZone(String zoneId, DateTime utc) {
