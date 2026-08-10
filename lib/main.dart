@@ -2594,7 +2594,55 @@ class _TimelineEventCard extends StatelessWidget {
             final micro = constraints.maxHeight < 30;
             final tiny = constraints.maxHeight < 38;
             final short = constraints.maxHeight < 52;
-            final compact = constraints.maxHeight < 44;
+
+            final horizontalPadding = ultraTiny
+                ? 4.0
+                : micro
+                ? 4.0
+                : short
+                ? 4.5
+                : 6.0;
+            final verticalPadding = ultraTiny
+                ? 0.0
+                : micro
+                ? 0.0
+                : short
+                ? 0.5
+                : 1.0;
+            final titleFontSize = ultraTiny
+                ? 10.0
+                : micro
+                ? 12.5
+                : tiny
+                ? 14.0
+                : short
+                ? 15.0
+                : 18.0;
+            final timeFontSize = micro
+                ? 9.5
+                : tiny
+                ? 10.5
+                : short
+                ? 11.5
+                : 13.0;
+            final gap = micro
+                ? 0.0
+                : tiny
+                ? 1.0
+                : short
+                ? 1.5
+                : 2.0;
+
+            final showTime = !ultraTiny;
+            // Title/time both render with an explicit line-height of 1, so a
+            // line's rendered height equals its font size exactly.
+            final reservedForTime = showTime ? gap + timeFontSize : 0.0;
+            final availableForTitle =
+                constraints.maxHeight - (verticalPadding * 2) - reservedForTime;
+            final titleMaxLines = math.max(
+              1,
+              (availableForTitle / titleFontSize).floor(),
+            );
 
             return DecoratedBox(
               decoration: BoxDecoration(
@@ -2602,144 +2650,44 @@ class _TimelineEventCard extends StatelessWidget {
               ),
               child: Padding(
                 padding: EdgeInsets.symmetric(
-                  horizontal: ultraTiny ? 4 : (micro ? 4 : (short ? 4.5 : 6)),
-                  vertical: ultraTiny ? 0 : (micro ? 0 : (short ? 0.5 : 1)),
+                  horizontal: horizontalPadding,
+                  vertical: verticalPadding,
                 ),
                 child: DefaultTextStyle(
                   style: const TextStyle(color: Colors.white),
-                  child: ultraTiny
-                      ? Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            event.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w800,
-                              height: 1,
-                            ),
-                          ),
-                        )
-                      : micro
-                      ? Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Expanded(
-                              child: Text(
-                                event.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 13.5,
-                                  fontWeight: FontWeight.w900,
-                                  height: 1,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 3),
-                            Flexible(
-                              child: Align(
-                                alignment: Alignment.centerRight,
-                                child: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    timelineTimeRangeLabel(event),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    textAlign: TextAlign.right,
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w700,
-                                      color: accent.withValues(alpha: 0.95),
-                                      height: 1,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        )
-                      : tiny
-                      ? Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Expanded(
-                              child: Text(
-                                event.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w900,
-                                  height: 1,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 3),
-                            Flexible(
-                              child: Align(
-                                alignment: Alignment.centerRight,
-                                child: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    timelineTimeRangeLabel(event),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    textAlign: TextAlign.right,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w700,
-                                      color: accent.withValues(alpha: 0.95),
-                                      height: 1,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        )
-                      : Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            Expanded(
-                              child: Align(
-                                alignment: Alignment.centerLeft,
-                                child: Text(
-                                  event.title,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: short ? 18 : 21,
-                                    fontWeight: FontWeight.w900,
-                                    height: 1,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            SizedBox(width: compact ? 3 : 6),
-                            Flexible(
-                              child: Align(
-                                alignment: Alignment.centerRight,
-                                child: FittedBox(
-                                  fit: BoxFit.scaleDown,
-                                  child: Text(
-                                    timelineTimeRangeLabel(event),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    textAlign: TextAlign.right,
-                                    style: TextStyle(
-                                      fontSize: short ? 15 : 17.5,
-                                      fontWeight: FontWeight.w700,
-                                      color: accent.withValues(alpha: 0.95),
-                                      height: 1,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        event.title,
+                        maxLines: titleMaxLines,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: titleFontSize,
+                          fontWeight: ultraTiny
+                              ? FontWeight.w800
+                              : FontWeight.w900,
+                          height: 1,
                         ),
+                      ),
+                      if (showTime) ...[
+                        SizedBox(height: gap),
+                        Text(
+                          timelineTimeRangeLabel(event),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: timeFontSize,
+                            fontWeight: FontWeight.w700,
+                            color: accent.withValues(alpha: 0.95),
+                            height: 1,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
             );
