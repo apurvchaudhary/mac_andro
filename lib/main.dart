@@ -2667,9 +2667,21 @@ class MiniMeetingsTimeline extends StatefulWidget {
 class _MiniMeetingsTimelineState extends State<MiniMeetingsTimeline> {
   final ScrollController _scrollController = ScrollController();
   String? _lastAutoScrollKey;
+  Timer? _clockTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _clockTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
 
   @override
   void dispose() {
+    _clockTimer?.cancel();
     _scrollController.dispose();
     super.dispose();
   }
@@ -3175,10 +3187,13 @@ class DashboardApi {
   }
 
   Future<dynamic> _getJson(Uri uri) async {
-    final request = await _client.getUrl(uri);
+    final request = await _client.getUrl(uri).timeout(kRequestTimeout);
     request.headers.set(HttpHeaders.acceptHeader, 'application/json');
     final response = await request.close().timeout(kRequestTimeout);
-    final body = await response.transform(utf8.decoder).join();
+    final body = await response
+        .transform(utf8.decoder)
+        .join()
+        .timeout(kRequestTimeout);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw HttpException('Bad status ${response.statusCode}', uri: uri);
     }
