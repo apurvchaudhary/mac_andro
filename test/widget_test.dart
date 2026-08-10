@@ -116,9 +116,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('calendar tap opens full screen calendar page', (
-    tester,
-  ) async {
+  testWidgets('calendar tap opens full screen calendar page', (tester) async {
     SharedPreferences.setMockInitialValues({});
     tester.view.physicalSize = const Size(1600, 1200);
     tester.view.devicePixelRatio = 1.0;
@@ -134,7 +132,7 @@ void main() {
     expect(find.byType(FullScreenCalendarPage), findsOneWidget);
   });
 
-  testWidgets('clock settings dialog opens on clock card tap', (
+  testWidgets('clock settings dialog opens on clock card long press', (
     tester,
   ) async {
     SharedPreferences.setMockInitialValues({});
@@ -145,7 +143,7 @@ void main() {
     await tester.pumpWidget(const DashboardApp());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('New Delhi'));
+    await tester.longPress(find.text('New Delhi'));
     await tester.pumpAndSettle();
 
     expect(find.text('Clock Settings'), findsOneWidget);
@@ -154,7 +152,7 @@ void main() {
     expect(find.text('Color'), findsAtLeastNWidgets(1));
   });
 
-  testWidgets('data source settings page opens from a gauge tap', (
+  testWidgets('data source settings page opens from a gauge long press', (
     tester,
   ) async {
     SharedPreferences.setMockInitialValues({});
@@ -165,7 +163,7 @@ void main() {
     await tester.pumpWidget(const DashboardApp());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('CPU'));
+    await tester.longPress(find.text('CPU'));
     await tester.pumpAndSettle();
 
     expect(find.text('Data Source Settings'), findsOneWidget);

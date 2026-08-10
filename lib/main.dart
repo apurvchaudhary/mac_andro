@@ -247,13 +247,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final allTodayEvents = eventsForDay(_snapshot.events, DateTime.now());
-    final todayEvents = allTodayEvents.take(6).toList();
-    final upcomingEvents =
-        (todayEvents.isNotEmpty
-                ? todayEvents
-                : validatedUpcomingEvents(_snapshot.events))
-            .take(6)
-            .toList();
+    final upcomingEvents = allTodayEvents.isNotEmpty
+        ? allTodayEvents
+        : validatedUpcomingEvents(_snapshot.events).take(6).toList();
 
     return Scaffold(
       body: DecoratedBox(
@@ -314,6 +310,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   networkStyle: true,
                                   alertsEnabled: _hasSyncedOnce,
                                   onHold: _openDataSourceSettings,
+                                  netMbps: _snapshot.netMbps,
+                                  netUpdatedAt: _snapshot.netUpdatedAt,
                                 ),
                               ),
                               SizedBox(width: spacing),
@@ -487,6 +485,8 @@ class GaugeCard extends StatelessWidget {
     required this.onHold,
     this.networkStyle = false,
     this.alertsEnabled = true,
+    this.netMbps,
+    this.netUpdatedAt,
   });
 
   final String label;
@@ -495,6 +495,8 @@ class GaugeCard extends StatelessWidget {
   final VoidCallback onHold;
   final bool networkStyle;
   final bool alertsEnabled;
+  final double? netMbps;
+  final DateTime? netUpdatedAt;
 
   @override
   Widget build(BuildContext context) {
@@ -509,7 +511,7 @@ class GaugeCard extends StatelessWidget {
             Palette.progressBad;
 
     return GestureDetector(
-      onTap: onHold,
+      onLongPress: onHold,
       child: GaugeAlertGlow(
         active: isCritical,
         child: ClipRRect(
@@ -520,6 +522,8 @@ class GaugeCard extends StatelessWidget {
               targetValue: clampedValue,
               reverseColorLogic: reverseColorLogic,
               networkStyle: networkStyle,
+              netMbps: netMbps,
+              netUpdatedAt: netUpdatedAt,
             ),
           ),
         ),
@@ -611,12 +615,16 @@ class AnimatedGauge extends StatelessWidget {
     required this.targetValue,
     required this.reverseColorLogic,
     required this.networkStyle,
+    this.netMbps,
+    this.netUpdatedAt,
   });
 
   final String label;
   final double targetValue;
   final bool reverseColorLogic;
   final bool networkStyle;
+  final double? netMbps;
+  final DateTime? netUpdatedAt;
 
   @override
   Widget build(BuildContext context) {
@@ -691,6 +699,36 @@ class AnimatedGauge extends StatelessWidget {
                       ],
                     ),
                     const Spacer(),
+                    if (networkStyle) ...[
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.access_time_rounded,
+                            size: compact ? 9.0 : 10.0,
+                            color: Palette.highlight,
+                          ),
+                          const SizedBox(width: 3),
+                          _LiveElapsedLabel(
+                            since: netUpdatedAt,
+                            style: TextStyle(
+                              fontSize: compact ? 9.0 : 10.0,
+                              fontWeight: FontWeight.w700,
+                              color: Palette.highlight,
+                            ),
+                          ),
+                          const Spacer(),
+                          Text(
+                            '${(netMbps ?? 0).toStringAsFixed(0)} Mbps',
+                            style: TextStyle(
+                              fontSize: compact ? 11.0 : 12.5,
+                              fontWeight: FontWeight.w800,
+                              color: Palette.highlight,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                    ],
                     const SizedBox(height: 6),
                   ],
                 ),
@@ -700,6 +738,45 @@ class AnimatedGauge extends StatelessWidget {
         );
       },
     );
+  }
+}
+
+class _LiveElapsedLabel extends StatefulWidget {
+  const _LiveElapsedLabel({required this.since, required this.style});
+
+  final DateTime? since;
+  final TextStyle style;
+
+  @override
+  State<_LiveElapsedLabel> createState() => _LiveElapsedLabelState();
+}
+
+class _LiveElapsedLabelState extends State<_LiveElapsedLabel> {
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final since = widget.since;
+    final label = since == null
+        ? '--'
+        : '${elapsedLabel(DateTime.now().difference(since))} ago';
+    return Text(label, style: widget.style);
   }
 }
 
@@ -745,7 +822,7 @@ class _ClocksCardState extends State<ClocksCard> {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: widget.onHold,
+      onLongPress: widget.onHold,
       child: DashboardCard(
         padding: widget.compactMode
             ? const EdgeInsets.fromLTRB(6, 5, 6, 5)
@@ -2268,6 +2345,7 @@ class _DaySchedulePageState extends State<DaySchedulePage> {
   Future<void> _openAvailabilitySettings() async {
     final updated = await showDialog<AvailabilitySettings>(
       context: context,
+      barrierDismissible: false,
       builder: (context) =>
           AvailabilitySettingsDialog(initialSettings: _availabilitySettings),
     );
@@ -2565,6 +2643,30 @@ class _DayTimelineState extends State<DayTimeline> {
   }
 }
 
+final Map<String, double> _timelineLineHeightCache = <String, double>{};
+
+// Text's `height: 1` scales the *font's* ascent+descent metric, which is
+// larger than `fontSize` for most fonts, so assuming a line renders at
+// exactly `fontSize` pixels tall causes 1px RenderFlex overflows. Measuring
+// with the same TextPainter machinery Text uses internally gives the real
+// rendered line height instead.
+double _timelineLineHeight({
+  required double fontSize,
+  required FontWeight fontWeight,
+}) {
+  final key = '$fontSize-$fontWeight';
+  return _timelineLineHeightCache.putIfAbsent(key, () {
+    final painter = TextPainter(
+      text: TextSpan(
+        text: 'Hg',
+        style: TextStyle(fontSize: fontSize, fontWeight: fontWeight, height: 1),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    return painter.height;
+  });
+}
+
 class _TimelineEventCard extends StatelessWidget {
   const _TimelineEventCard({required this.event});
 
@@ -2633,15 +2735,41 @@ class _TimelineEventCard extends StatelessWidget {
                 ? 1.5
                 : 2.0;
 
-            final showTime = !ultraTiny;
-            // Title/time both render with an explicit line-height of 1, so a
-            // line's rendered height equals its font size exactly.
-            final reservedForTime = showTime ? gap + timeFontSize : 0.0;
-            final availableForTitle =
-                constraints.maxHeight - (verticalPadding * 2) - reservedForTime;
+            final titleFontWeight = ultraTiny
+                ? FontWeight.w800
+                : FontWeight.w900;
+            final titleLineHeight = _timelineLineHeight(
+              fontSize: titleFontSize,
+              fontWeight: titleFontWeight,
+            );
+            final verticalSpace = constraints.maxHeight - (verticalPadding * 2);
+            // Shrink the time text down to fit alongside at least one title
+            // line before giving up and hiding it; only hiding it outright
+            // (rather than shrinking) would waste space that could still fit
+            // a smaller, readable time label.
+            const minTimeFontSize = 8.0;
+            var effectiveTimeFontSize = timeFontSize;
+            var timeLineHeight = _timelineLineHeight(
+              fontSize: effectiveTimeFontSize,
+              fontWeight: FontWeight.w700,
+            );
+            while (!ultraTiny &&
+                effectiveTimeFontSize > minTimeFontSize &&
+                verticalSpace < titleLineHeight + gap + timeLineHeight) {
+              effectiveTimeFontSize -= 0.5;
+              timeLineHeight = _timelineLineHeight(
+                fontSize: effectiveTimeFontSize,
+                fontWeight: FontWeight.w700,
+              );
+            }
+            final showTime =
+                !ultraTiny &&
+                verticalSpace >= titleLineHeight + gap + timeLineHeight;
+            final reservedForTime = showTime ? gap + timeLineHeight : 0.0;
+            final availableForTitle = verticalSpace - reservedForTime;
             final titleMaxLines = math.max(
               1,
-              (availableForTitle / titleFontSize).floor(),
+              (availableForTitle / titleLineHeight).floor(),
             );
 
             return DecoratedBox(
@@ -2666,9 +2794,7 @@ class _TimelineEventCard extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: titleFontSize,
-                          fontWeight: ultraTiny
-                              ? FontWeight.w800
-                              : FontWeight.w900,
+                          fontWeight: titleFontWeight,
                           height: 1,
                         ),
                       ),
@@ -2679,7 +2805,7 @@ class _TimelineEventCard extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            fontSize: timeFontSize,
+                            fontSize: effectiveTimeFontSize,
                             fontWeight: FontWeight.w700,
                             color: accent.withValues(alpha: 0.95),
                             height: 1,
@@ -2753,7 +2879,7 @@ class EventsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onHold,
+      onLongPress: onHold,
       child: DashboardCard(
         padding: compactMode
             ? const EdgeInsets.fromLTRB(4, 4, 4, 3)
@@ -3572,6 +3698,8 @@ class DashboardSnapshot {
     required this.cpu,
     required this.mem,
     required this.net,
+    required this.netMbps,
+    required this.netUpdatedAt,
     required this.power,
     required this.events,
   });
@@ -3579,14 +3707,22 @@ class DashboardSnapshot {
   final double cpu;
   final double mem;
   final double net;
+  final double netMbps;
+  final DateTime? netUpdatedAt;
   final double power;
   final List<CalendarEvent> events;
 
   factory DashboardSnapshot.fromJson(Map<String, dynamic> json) {
+    final netJson = json['net'];
+    final net = netJson is Map
+        ? Map<String, dynamic>.from(netJson)
+        : const <String, dynamic>{};
     return DashboardSnapshot(
       cpu: parseDouble(json['cpu']),
       mem: parseDouble(json['mem']),
-      net: parseDouble(json['net']),
+      net: parseDouble(net['gauge']),
+      netMbps: parseDouble(net['mbps']),
+      netUpdatedAt: parseIsoToLocal(net['updated_at']),
       power: parseDouble(json['power']),
       events: switch (json['events']) {
         List<dynamic> list =>
@@ -3607,6 +3743,8 @@ class DashboardSnapshot {
       cpu: 0,
       mem: 0,
       net: 0,
+      netMbps: 0,
+      netUpdatedAt: null,
       power: 0,
       events: [],
     );
@@ -3621,12 +3759,22 @@ class DashboardSnapshot {
         other.cpu == cpu &&
         other.mem == mem &&
         other.net == net &&
+        other.netMbps == netMbps &&
+        other.netUpdatedAt == netUpdatedAt &&
         other.power == power &&
         listEquals(other.events, events);
   }
 
   @override
-  int get hashCode => Object.hash(cpu, mem, net, power, Object.hashAll(events));
+  int get hashCode => Object.hash(
+    cpu,
+    mem,
+    net,
+    netMbps,
+    netUpdatedAt,
+    power,
+    Object.hashAll(events),
+  );
 }
 
 class ClockConfig {
