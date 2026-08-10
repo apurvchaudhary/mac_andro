@@ -69,7 +69,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     ClockConfig(zoneId: 'europe_berlin', colorId: 'green'),
   ];
   bool _polling = false;
+  bool _hasSyncedOnce = false;
   int _meetingsRefreshToken = 0;
+  final ValueNotifier<bool> _offline = ValueNotifier<bool>(false);
+  final ValueNotifier<DateTime?> _lastSuccessAt = ValueNotifier<DateTime?>(
+    null,
+  );
 
   @override
   void initState() {
@@ -85,6 +90,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void dispose() {
     _pollTimer?.cancel();
     _api.dispose();
+    _offline.dispose();
+    _lastSuccessAt.dispose();
     super.dispose();
   }
 
@@ -99,12 +106,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (!mounted) {
         return;
       }
+      _lastSuccessAt.value = DateTime.now();
+      _offline.value = false;
+      _hasSyncedOnce = true;
       if (snapshot == _snapshot) {
         return;
       }
       setState(() {
         _snapshot = snapshot;
       });
+    } catch (_) {
+      if (mounted) {
+        _offline.value = true;
+      }
     } finally {
       _polling = false;
     }
@@ -232,14 +246,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final todayEvents = eventsForDay(_snapshot.events, DateTime.now())
-        .take(6)
-        .toList();
-    final upcomingEvents = (todayEvents.isNotEmpty
-            ? todayEvents
-            : validatedUpcomingEvents(_snapshot.events))
-        .take(6)
-        .toList();
+    final allTodayEvents = eventsForDay(_snapshot.events, DateTime.now());
+    final todayEvents = allTodayEvents.take(6).toList();
+    final upcomingEvents =
+        (todayEvents.isNotEmpty
+                ? todayEvents
+                : validatedUpcomingEvents(_snapshot.events))
+            .take(6)
+            .toList();
 
     return Scaffold(
       body: DecoratedBox(
@@ -260,93 +274,106 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 return const SizedBox.shrink();
               }
 
-              return Padding(
-                padding: EdgeInsets.all(compactDashboard ? 4 : spacing),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Flexible(
-                      flex: compactDashboard ? 6 : 8,
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Expanded(
-                            child: GaugeCard(
-                              label: 'CPU',
-                              value: _snapshot.cpu,
-                              reverseColorLogic: false,
-                              onHold: _openDataSourceSettings,
-                            ),
+              return Stack(
+                children: [
+                  Padding(
+                    padding: EdgeInsets.all(compactDashboard ? 4 : spacing),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Flexible(
+                          flex: compactDashboard ? 6 : 8,
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(
+                                child: GaugeCard(
+                                  label: 'CPU',
+                                  value: _snapshot.cpu,
+                                  reverseColorLogic: false,
+                                  alertsEnabled: _hasSyncedOnce,
+                                  onHold: _openDataSourceSettings,
+                                ),
+                              ),
+                              SizedBox(width: spacing),
+                              Expanded(
+                                child: GaugeCard(
+                                  label: 'Memory',
+                                  value: _snapshot.mem,
+                                  reverseColorLogic: false,
+                                  alertsEnabled: _hasSyncedOnce,
+                                  onHold: _openDataSourceSettings,
+                                ),
+                              ),
+                              SizedBox(width: spacing),
+                              Expanded(
+                                child: GaugeCard(
+                                  label: 'Network',
+                                  value: _snapshot.net,
+                                  reverseColorLogic: false,
+                                  networkStyle: true,
+                                  alertsEnabled: _hasSyncedOnce,
+                                  onHold: _openDataSourceSettings,
+                                ),
+                              ),
+                              SizedBox(width: spacing),
+                              Expanded(
+                                child: GaugeCard(
+                                  label: 'Battery',
+                                  value: _snapshot.power,
+                                  reverseColorLogic: true,
+                                  alertsEnabled: _hasSyncedOnce,
+                                  onHold: _openDataSourceSettings,
+                                ),
+                              ),
+                            ],
                           ),
-                          SizedBox(width: spacing),
-                          Expanded(
-                            child: GaugeCard(
-                              label: 'Memory',
-                              value: _snapshot.mem,
-                              reverseColorLogic: false,
-                              onHold: _openDataSourceSettings,
-                            ),
+                        ),
+                        SizedBox(height: spacing),
+                        Flexible(
+                          flex: compactDashboard ? 14 : 12,
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(
+                                child: ClocksCard(
+                                  clockConfigs: _clockConfigs,
+                                  onHold: _openClockSettings,
+                                  compactMode: compactDashboard,
+                                ),
+                              ),
+                              SizedBox(width: spacing),
+                              Expanded(
+                                child: CalendarCard(
+                                  displayMonth: _displayMonth,
+                                  onPrev: () => _shiftMonth(-1),
+                                  onNext: () => _shiftMonth(1),
+                                  onHold: _openCalendarPage,
+                                  compactMode: compactDashboard,
+                                ),
+                              ),
+                              SizedBox(width: spacing),
+                              Expanded(
+                                child: EventsCard(
+                                  events: upcomingEvents,
+                                  todayEvents: allTodayEvents,
+                                  onHold: _openDataSourceSettings,
+                                  onRefresh: _refreshMeetingsPanel,
+                                  refreshToken: _meetingsRefreshToken,
+                                  compactMode: compactDashboard,
+                                ),
+                              ),
+                            ],
                           ),
-                          SizedBox(width: spacing),
-                          Expanded(
-                            child: GaugeCard(
-                              label: 'Network',
-                              value: _snapshot.net,
-                              reverseColorLogic: false,
-                              networkStyle: true,
-                              onHold: _openDataSourceSettings,
-                            ),
-                          ),
-                          SizedBox(width: spacing),
-                          Expanded(
-                            child: GaugeCard(
-                              label: 'Battery',
-                              value: _snapshot.power,
-                              reverseColorLogic: true,
-                              onHold: _openDataSourceSettings,
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                    SizedBox(height: spacing),
-                    Flexible(
-                      flex: compactDashboard ? 14 : 12,
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Expanded(
-                            child: ClocksCard(
-                              clockConfigs: _clockConfigs,
-                              onHold: _openClockSettings,
-                              compactMode: compactDashboard,
-                            ),
-                          ),
-                          SizedBox(width: spacing),
-                          Expanded(
-                            child: CalendarCard(
-                              displayMonth: _displayMonth,
-                              onPrev: () => _shiftMonth(-1),
-                              onNext: () => _shiftMonth(1),
-                              onHold: _openCalendarPage,
-                              compactMode: compactDashboard,
-                            ),
-                          ),
-                          SizedBox(width: spacing),
-                          Expanded(
-                            child: EventsCard(
-                              events: upcomingEvents,
-                              onHold: _openDataSourceSettings,
-                              onRefresh: _refreshMeetingsPanel,
-                              refreshToken: _meetingsRefreshToken,
-                              compactMode: compactDashboard,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                  ConnectionStatusBadge(
+                    offline: _offline,
+                    lastSuccessAt: _lastSuccessAt,
+                  ),
+                ],
               );
             },
           ),
@@ -354,6 +381,101 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
     );
   }
+}
+
+class ConnectionStatusBadge extends StatefulWidget {
+  const ConnectionStatusBadge({
+    super.key,
+    required this.offline,
+    required this.lastSuccessAt,
+  });
+
+  final ValueListenable<bool> offline;
+  final ValueListenable<DateTime?> lastSuccessAt;
+
+  @override
+  State<ConnectionStatusBadge> createState() => _ConnectionStatusBadgeState();
+}
+
+class _ConnectionStatusBadgeState extends State<ConnectionStatusBadge> {
+  Timer? _ticker;
+
+  @override
+  void initState() {
+    super.initState();
+    _ticker = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: widget.offline,
+      builder: (context, offline, _) {
+        if (!offline) {
+          return const SizedBox.shrink();
+        }
+        final since = widget.lastSuccessAt.value;
+        final label = since == null
+            ? 'Offline · no data yet'
+            : 'Offline · last update ${elapsedLabel(DateTime.now().difference(since))} ago';
+        return Align(
+          alignment: Alignment.topCenter,
+          child: IgnorePointer(
+            child: Container(
+              margin: const EdgeInsets.only(top: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              decoration: BoxDecoration(
+                color: Palette.progressBad.withValues(alpha: 0.92),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: const [
+                  BoxShadow(color: Colors.black45, blurRadius: 12),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.cloud_off_rounded,
+                    size: 14,
+                    color: Colors.white,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+String elapsedLabel(Duration elapsed) {
+  if (elapsed.inSeconds < 60) {
+    return '${elapsed.inSeconds}s';
+  }
+  if (elapsed.inMinutes < 60) {
+    return '${elapsed.inMinutes}m';
+  }
+  return '${elapsed.inHours}h';
 }
 
 class GaugeCard extends StatelessWidget {
@@ -364,6 +486,7 @@ class GaugeCard extends StatelessWidget {
     required this.reverseColorLogic,
     required this.onHold,
     this.networkStyle = false,
+    this.alertsEnabled = true,
   });
 
   final String label;
@@ -371,22 +494,112 @@ class GaugeCard extends StatelessWidget {
   final bool reverseColorLogic;
   final VoidCallback onHold;
   final bool networkStyle;
+  final bool alertsEnabled;
 
   @override
   Widget build(BuildContext context) {
+    final clampedValue = value.clamp(0, 100).toDouble();
+    final isCritical =
+        alertsEnabled &&
+        gaugeProgressColor(
+              clampedValue,
+              reverse: reverseColorLogic,
+              networkStyle: networkStyle,
+            ) ==
+            Palette.progressBad;
+
     return GestureDetector(
       onTap: onHold,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
-        child: RepaintBoundary(
-          child: AnimatedGauge(
-            label: label,
-            targetValue: value.clamp(0, 100).toDouble(),
-            reverseColorLogic: reverseColorLogic,
-            networkStyle: networkStyle,
+      child: GaugeAlertGlow(
+        active: isCritical,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: RepaintBoundary(
+            child: AnimatedGauge(
+              label: label,
+              targetValue: clampedValue,
+              reverseColorLogic: reverseColorLogic,
+              networkStyle: networkStyle,
+            ),
           ),
         ),
       ),
+    );
+  }
+}
+
+class GaugeAlertGlow extends StatefulWidget {
+  const GaugeAlertGlow({super.key, required this.active, required this.child});
+
+  final bool active;
+  final Widget child;
+
+  @override
+  State<GaugeAlertGlow> createState() => _GaugeAlertGlowState();
+}
+
+class _GaugeAlertGlowState extends State<GaugeAlertGlow>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+    if (widget.active) {
+      _controller.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant GaugeAlertGlow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.active && !_controller.isAnimating) {
+      _controller.repeat(reverse: true);
+    } else if (!widget.active && _controller.isAnimating) {
+      _controller.stop();
+      _controller.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.active) {
+      return widget.child;
+    }
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final glowAlpha = 0.18 + (_controller.value * 0.42);
+        final borderAlpha = 0.5 + (_controller.value * 0.5);
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Palette.progressBad.withValues(alpha: glowAlpha),
+                blurRadius: 18,
+                spreadRadius: 2,
+              ),
+            ],
+            border: Border.all(
+              color: Palette.progressBad.withValues(alpha: borderAlpha),
+              width: 2,
+            ),
+          ),
+          child: child,
+        );
+      },
+      child: widget.child,
     );
   }
 }
@@ -547,15 +760,17 @@ class _ClocksCardState extends State<ClocksCard> {
 
             final titleSize = widget.compactMode
                 ? (tallCompactStack
-                    ? 15.0
-                    : (fullHeightCompactGrid ? 15.0 : (stacked ? 17.0 : 14.5)))
+                      ? 15.0
+                      : (fullHeightCompactGrid
+                            ? 15.0
+                            : (stacked ? 17.0 : 14.5)))
                 : (stacked ? (compact ? 15.0 : 20.0) : (compact ? 13.0 : 16.0));
             final timeSize = widget.compactMode
                 ? (tallCompactStack
-                    ? 44.0
-                    : (fullHeightCompactGrid
-                          ? 40.0
-                          : (stacked ? 60.0 : 35.0)))
+                      ? 44.0
+                      : (fullHeightCompactGrid
+                            ? 40.0
+                            : (stacked ? 60.0 : 35.0)))
                 : (stacked ? (compact ? 50.0 : 76.0) : (compact ? 30.0 : 40.0));
             final gap = widget.compactMode
                 ? (tallCompactStack
@@ -674,7 +889,9 @@ class _ClocksCardState extends State<ClocksCard> {
                           ),
                         ),
                         if (i != displays.length - 1)
-                          SizedBox(height: widget.compactMode ? 2 : (compact ? 4 : 8)),
+                          SizedBox(
+                            height: widget.compactMode ? 2 : (compact ? 4 : 8),
+                          ),
                       ],
                     ],
                   )
@@ -1035,11 +1252,16 @@ class _ClockSettingsDialogState extends State<ClockSettingsDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
                 decoration: BoxDecoration(
                   color: Palette.surface,
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.08),
+                  ),
                 ),
                 child: Row(
                   children: [
@@ -1229,12 +1451,7 @@ class _DataSourceSettingsPageState extends State<DataSourceSettingsPage> {
           builder: (context, constraints) {
             return SingleChildScrollView(
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              padding: EdgeInsets.fromLTRB(
-                20,
-                20,
-                20,
-                20 + viewInsets.bottom,
-              ),
+              padding: EdgeInsets.fromLTRB(20, 20, 20, 20 + viewInsets.bottom),
               child: ConstrainedBox(
                 constraints: BoxConstraints(minHeight: constraints.maxHeight),
                 child: Column(
@@ -2254,89 +2471,90 @@ class _DayTimelineState extends State<DayTimeline> {
               height: contentHeight,
               child: Stack(
                 children: [
-                for (var hour = 0; hour <= 24; hour++)
-                  Positioned(
-                    left: leftPad,
-                    right: rightPad,
-                    top: hour * 60 * pixelsPerMinute,
-                    child: Container(
-                      height: 1,
-                      color: Colors.white.withValues(alpha: 0.08),
+                  for (var hour = 0; hour <= 24; hour++)
+                    Positioned(
+                      left: leftPad,
+                      right: rightPad,
+                      top: hour * 60 * pixelsPerMinute,
+                      child: Container(
+                        height: 1,
+                        color: Colors.white.withValues(alpha: 0.08),
+                      ),
                     ),
-                  ),
-                for (var halfHour = 0; halfHour < 24; halfHour++)
-                  Positioned(
-                    left: leftPad,
-                    right: rightPad,
-                    top: ((halfHour * 60) + 30) * pixelsPerMinute,
-                    child: SizedBox(
-                      height: 1,
-                      child: CustomPaint(
-                        painter: DashedLinePainter(
-                          color: Colors.white.withValues(alpha: 0.08),
-                          dashWidth: 5,
-                          dashGap: 5,
+                  for (var halfHour = 0; halfHour < 24; halfHour++)
+                    Positioned(
+                      left: leftPad,
+                      right: rightPad,
+                      top: ((halfHour * 60) + 30) * pixelsPerMinute,
+                      child: SizedBox(
+                        height: 1,
+                        child: CustomPaint(
+                          painter: DashedLinePainter(
+                            color: Colors.white.withValues(alpha: 0.08),
+                            dashWidth: 5,
+                            dashGap: 5,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                for (var hour = 0; hour < 24; hour++)
-                  Positioned(
-                    left: 0,
-                    width: leftPad - 14,
-                    top: (hour * 60 * pixelsPerMinute) - 9,
-                    child: Text(
-                      '${hour.toString().padLeft(2, '0')}:00',
-                      textAlign: TextAlign.right,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: Palette.textSubtle,
-                        shadows: [
-                          Shadow(
-                            color: Colors.black.withValues(alpha: 0.22),
-                            blurRadius: 4,
-                          ),
-                        ],
+                  for (var hour = 0; hour < 24; hour++)
+                    Positioned(
+                      left: 0,
+                      width: leftPad - 14,
+                      top: (hour * 60 * pixelsPerMinute) - 9,
+                      child: Text(
+                        '${hour.toString().padLeft(2, '0')}:00',
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Palette.textSubtle,
+                          shadows: [
+                            Shadow(
+                              color: Colors.black.withValues(alpha: 0.22),
+                              blurRadius: 4,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                for (var halfHour = 0; halfHour < 24; halfHour++)
-                  Positioned(
-                    left: 0,
-                    width: leftPad - 14,
-                    top: ((halfHour * 60) + 30) * pixelsPerMinute - 8,
-                    child: Text(
-                      '${halfHour.toString().padLeft(2, '0')}:30',
-                      textAlign: TextAlign.right,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: Palette.textSubtle,
-                        shadows: [
-                          Shadow(
-                            color: Colors.black.withValues(alpha: 0.22),
-                            blurRadius: 4,
-                          ),
-                        ],
+                  for (var halfHour = 0; halfHour < 24; halfHour++)
+                    Positioned(
+                      left: 0,
+                      width: leftPad - 14,
+                      top: ((halfHour * 60) + 30) * pixelsPerMinute - 8,
+                      child: Text(
+                        '${halfHour.toString().padLeft(2, '0')}:30',
+                        textAlign: TextAlign.right,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Palette.textSubtle,
+                          shadows: [
+                            Shadow(
+                              color: Colors.black.withValues(alpha: 0.22),
+                              blurRadius: 4,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                for (final item in items)
-                  Positioned(
-                    left:
-                        leftPad +
-                        ((timelineWidth / item.totalColumns) *
-                            item.columnIndex) +
-                        8,
-                    top: item.startMinute * pixelsPerMinute + 4,
-                    width: (timelineWidth / item.totalColumns) - 16,
-                    height: math.max(
-                      18,
-                      (item.endMinute - item.startMinute) * pixelsPerMinute - 8,
+                  for (final item in items)
+                    Positioned(
+                      left:
+                          leftPad +
+                          ((timelineWidth / item.totalColumns) *
+                              item.columnIndex) +
+                          8,
+                      top: item.startMinute * pixelsPerMinute + 4,
+                      width: (timelineWidth / item.totalColumns) - 16,
+                      height: math.max(
+                        18,
+                        (item.endMinute - item.startMinute) * pixelsPerMinute -
+                            8,
+                      ),
+                      child: _TimelineEventCard(event: item.event),
                     ),
-                    child: _TimelineEventCard(event: item.event),
-                  ),
                 ],
               ),
             ),
@@ -2359,9 +2577,12 @@ class _TimelineEventCard extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(4),
-        color: Color.lerp(Palette.surfaceRaised, accent, 0.18)?.withValues(
-              alpha: 0.9,
-            ) ??
+        color:
+            Color.lerp(
+              Palette.surfaceRaised,
+              accent,
+              0.18,
+            )?.withValues(alpha: 0.9) ??
             Palette.surfaceRaised,
         border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
       ),
@@ -2381,9 +2602,7 @@ class _TimelineEventCard extends StatelessWidget {
               ),
               child: Padding(
                 padding: EdgeInsets.symmetric(
-                  horizontal: ultraTiny
-                      ? 4
-                      : (micro ? 4 : (short ? 4.5 : 6)),
+                  horizontal: ultraTiny ? 4 : (micro ? 4 : (short ? 4.5 : 6)),
                   vertical: ultraTiny ? 0 : (micro ? 0 : (short ? 0.5 : 1)),
                 ),
                 child: DefaultTextStyle(
@@ -2569,6 +2788,7 @@ class EventsCard extends StatelessWidget {
   const EventsCard({
     super.key,
     required this.events,
+    required this.todayEvents,
     required this.onHold,
     required this.onRefresh,
     required this.refreshToken,
@@ -2576,6 +2796,7 @@ class EventsCard extends StatelessWidget {
   });
 
   final List<CalendarEvent> events;
+  final List<CalendarEvent> todayEvents;
   final VoidCallback onHold;
   final Future<void> Function() onRefresh;
   final int refreshToken;
@@ -2626,6 +2847,11 @@ class EventsCard extends StatelessWidget {
                 ),
               ],
             ),
+            SizedBox(height: compactMode ? 3 : 6),
+            MeetingStatusBar(
+              todayEvents: todayEvents,
+              compactMode: compactMode,
+            ),
             SizedBox(height: compactMode ? 2 : 8),
             Expanded(
               child: events.isEmpty
@@ -2646,6 +2872,203 @@ class EventsCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class MeetingStatusBar extends StatefulWidget {
+  const MeetingStatusBar({
+    super.key,
+    required this.todayEvents,
+    this.compactMode = false,
+  });
+
+  final List<CalendarEvent> todayEvents;
+  final bool compactMode;
+
+  @override
+  State<MeetingStatusBar> createState() => _MeetingStatusBarState();
+}
+
+class _MeetingStatusBarState extends State<MeetingStatusBar> {
+  Timer? _ticker;
+  AvailabilitySettings _settings = AvailabilitySettings.defaults;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+    _ticker = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  Future<void> _loadSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(kAvailabilitySettingsPrefKey);
+      if (raw == null || !mounted) {
+        return;
+      }
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) {
+        return;
+      }
+      final parsed = AvailabilitySettings.fromJson(decoded);
+      if (parsed == null) {
+        return;
+      }
+      setState(() {
+        _settings = parsed;
+      });
+    } catch (_) {
+      // Keep default availability window if local preferences are unavailable.
+    }
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final dayDate = DateTime(now.year, now.month, now.day);
+    final currentMinute = (now.hour * 60) + now.minute;
+
+    CalendarEvent? ongoing;
+    CalendarEvent? next;
+    for (final event in widget.todayEvents) {
+      final start = event.start;
+      final end = event.end ?? start;
+      if (start == null || end == null) {
+        continue;
+      }
+      final startMinute = (start.hour * 60) + start.minute;
+      final endMinute = (end.hour * 60) + end.minute;
+      if (startMinute <= currentMinute && currentMinute < endMinute) {
+        ongoing = event;
+        break;
+      }
+      if (startMinute > currentMinute && next == null) {
+        next = event;
+      }
+    }
+
+    String label;
+    Color color;
+    IconData icon;
+    var pulsing = false;
+
+    if (ongoing != null) {
+      final end = ongoing.end!;
+      final minutesLeft = math.max(
+        0,
+        ((end.hour * 60) + end.minute) - currentMinute,
+      );
+      label = 'In meeting · ends in ${durationLabel(minutesLeft)}';
+      color = Palette.progressWarn;
+      icon = Icons.event_busy_rounded;
+      pulsing = minutesLeft <= 5;
+    } else if (next != null) {
+      final start = next.start!;
+      final minutesUntil = ((start.hour * 60) + start.minute) - currentMinute;
+      if (minutesUntil <= 15) {
+        label = 'Next: ${next.title} in ${durationLabel(minutesUntil)}';
+        color = Palette.progressBad;
+        icon = Icons.alarm_rounded;
+        pulsing = true;
+      } else if (freeSlotsForDay(widget.todayEvents, dayDate, _settings).any(
+        (slot) =>
+            slot.startMinute <= currentMinute && currentMinute < slot.endMinute,
+      )) {
+        label = 'Focus time · next meeting in ${durationLabel(minutesUntil)}';
+        color = Palette.progressGood;
+        icon = Icons.self_improvement_rounded;
+      } else {
+        label = 'Next: ${next.title} at ${meetingStartLabel(next)}';
+        color = Palette.textSubtle;
+        icon = Icons.event_rounded;
+      }
+    } else if (_settings.enabled &&
+        currentMinute >= _settings.workStartMinute &&
+        currentMinute < _settings.workEndMinute) {
+      label = 'Focus time · no more meetings today';
+      color = Palette.progressGood;
+      icon = Icons.self_improvement_rounded;
+    } else {
+      return const SizedBox.shrink();
+    }
+
+    final content = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: widget.compactMode ? 12 : 13, color: color),
+        const SizedBox(width: 5),
+        Flexible(
+          child: Text(
+            label,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: widget.compactMode ? 11 : 12,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+        ),
+      ],
+    );
+
+    return Align(
+      alignment: Alignment.center,
+      child: pulsing ? _PulseOpacity(child: content) : content,
+    );
+  }
+}
+
+class _PulseOpacity extends StatefulWidget {
+  const _PulseOpacity({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_PulseOpacity> createState() => _PulseOpacityState();
+}
+
+class _PulseOpacityState extends State<_PulseOpacity>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return Opacity(
+          opacity: 0.55 + (_controller.value * 0.45),
+          child: child,
+        );
+      },
+      child: widget.child,
     );
   }
 }
@@ -2701,8 +3124,7 @@ class _MiniMeetingsTimelineState extends State<MiniMeetingsTimeline> {
     _lastAutoScrollKey = key;
     final maxScroll = math.max(0.0, contentHeight - viewportHeight);
     final topAnchor = math.max(20.0, viewportHeight * 0.18);
-    final target = (((focusMinute - rangeStart) * pixelsPerMinute) -
-            topAnchor)
+    final target = (((focusMinute - rangeStart) * pixelsPerMinute) - topAnchor)
         .clamp(0.0, maxScroll);
     final distance = (_scrollController.offset - target).abs();
     final durationMs = distance < 32
@@ -2756,15 +3178,10 @@ class _MiniMeetingsTimelineState extends State<MiniMeetingsTimeline> {
       );
     }
 
-    final firstStart = items
-        .map((item) => item.startMinute)
-        .reduce(math.min);
+    final firstStart = items.map((item) => item.startMinute).reduce(math.min);
     final lastEnd = items.map((item) => item.endMinute).reduce(math.max);
     final rangeStart = math.max(0, ((firstStart - 5) ~/ 30) * 30);
-    final rangeEnd = math.min(
-      24 * 60,
-      (((lastEnd + 5) + 29) ~/ 30) * 30,
-    );
+    final rangeEnd = math.min(24 * 60, (((lastEnd + 5) + 29) ~/ 30) * 30);
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -2809,99 +3226,104 @@ class _MiniMeetingsTimelineState extends State<MiniMeetingsTimeline> {
                 height: contentHeight,
                 child: Stack(
                   children: [
-                  for (
-                    var minute = rangeStart;
-                    minute <= rangeEnd;
-                    minute += 30
-                  )
-                    Positioned(
-                      left: leftPad,
-                      right: rightPad,
-                      top: (minute - rangeStart) * pixelsPerMinute,
-                      child: SizedBox(
-                        height: 1,
-                        child: minute % 60 == 0
-                            ? DecoratedBox(
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.08),
-                                ),
-                              )
-                            : CustomPaint(
-                                painter: DashedLinePainter(
-                                  color: Colors.white.withValues(alpha: 0.06),
-                                  dashWidth: 4,
-                                  dashGap: 4,
-                                ),
-                              ),
-                      ),
-                    ),
-                  for (
-                    var minute = rangeStart;
-                    minute < rangeEnd;
-                    minute += 30
-                  )
-                    if (minute % 60 == 0)
+                    for (
+                      var minute = rangeStart;
+                      minute <= rangeEnd;
+                      minute += 30
+                    )
                       Positioned(
-                        left: 0,
-                        width: leftPad - 2,
-                        top: ((minute - rangeStart) * pixelsPerMinute) - 7,
-                        child: Text(
-                          compactHourLabel(minute),
-                          textAlign: TextAlign.right,
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            color: Palette.textSubtle,
+                        left: leftPad,
+                        right: rightPad,
+                        top: (minute - rangeStart) * pixelsPerMinute,
+                        child: SizedBox(
+                          height: 1,
+                          child: minute % 60 == 0
+                              ? DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.08),
+                                  ),
+                                )
+                              : CustomPaint(
+                                  painter: DashedLinePainter(
+                                    color: Colors.white.withValues(alpha: 0.06),
+                                    dashWidth: 4,
+                                    dashGap: 4,
+                                  ),
+                                ),
+                        ),
+                      ),
+                    for (
+                      var minute = rangeStart;
+                      minute < rangeEnd;
+                      minute += 30
+                    )
+                      if (minute % 60 == 0)
+                        Positioned(
+                          left: 0,
+                          width: leftPad - 2,
+                          top: ((minute - rangeStart) * pixelsPerMinute) - 7,
+                          child: Text(
+                            compactHourLabel(minute),
+                            textAlign: TextAlign.right,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: Palette.textSubtle,
+                            ),
+                          ),
+                        ),
+                    for (final item in items)
+                      Positioned(
+                        left:
+                            leftPad +
+                            ((timelineWidth / item.totalColumns) *
+                                item.columnIndex) +
+                            (horizontalGap / 2),
+                        top:
+                            ((item.startMinute - rangeStart) *
+                                pixelsPerMinute) +
+                            2,
+                        width:
+                            (timelineWidth / item.totalColumns) - horizontalGap,
+                        height: math.max(
+                          26,
+                          ((item.endMinute - item.startMinute) *
+                                  pixelsPerMinute) -
+                              4,
+                        ),
+                        child: _TimelineEventCard(event: item.event),
+                      ),
+                    if (showCurrentTimeLine)
+                      Positioned(
+                        left: 7,
+                        right: rightPad,
+                        top: (currentMinute - rangeStart) * pixelsPerMinute,
+                        child: SizedBox(
+                          height: 1,
+                          child: CustomPaint(
+                            painter: DashedLinePainter(
+                              color: Palette.highlight.withValues(alpha: 0.95),
+                              dashWidth: 6,
+                              dashGap: 4,
+                            ),
                           ),
                         ),
                       ),
-                  for (final item in items)
-                    Positioned(
-                      left:
-                          leftPad +
-                          ((timelineWidth / item.totalColumns) * item.columnIndex) +
-                          (horizontalGap / 2),
-                      top:
-                          ((item.startMinute - rangeStart) * pixelsPerMinute) +
-                          2,
-                      width:
-                          (timelineWidth / item.totalColumns) - horizontalGap,
-                      height: math.max(
-                        26,
-                        ((item.endMinute - item.startMinute) * pixelsPerMinute) -
-                            4,
-                      ),
-                      child: _TimelineEventCard(event: item.event),
-                    ),
-                  if (showCurrentTimeLine)
-                    Positioned(
-                      left: 7,
-                      right: rightPad,
-                      top: (currentMinute - rangeStart) * pixelsPerMinute,
-                      child: SizedBox(
-                        height: 1,
-                        child: CustomPaint(
-                          painter: DashedLinePainter(
-                            color: Palette.highlight.withValues(alpha: 0.95),
-                            dashWidth: 6,
-                            dashGap: 4,
+                    if (showCurrentTimeLine)
+                      Positioned(
+                        left: 4,
+                        top:
+                            ((currentMinute - rangeStart) * pixelsPerMinute) -
+                            3,
+                        child: Container(
+                          width: 6,
+                          height: 6,
+                          decoration: const BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: Palette.highlight,
                           ),
                         ),
                       ),
-                    ),
-                  if (showCurrentTimeLine)
-                    Positioned(
-                      left: 4,
-                      top: ((currentMinute - rangeStart) * pixelsPerMinute) - 3,
-                      child: Container(
-                        width: 6,
-                        height: 6,
-                        decoration: const BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Palette.highlight,
-                        ),
-                      ),
-                    ),
                   ],
                 ),
               ),
@@ -3125,11 +3547,7 @@ class GaugePainter extends CustomPainter {
       8.5,
       Paint()..color = Colors.black.withValues(alpha: 0.32),
     );
-    canvas.drawCircle(
-      center,
-      8.5,
-      Paint()..color = const Color(0xFFA8B5C3),
-    );
+    canvas.drawCircle(center, 8.5, Paint()..color = const Color(0xFFA8B5C3));
     canvas.drawCircle(center, 3, Paint()..color = const Color(0xFFF7FAFD));
     canvas.restore();
   }
@@ -3154,15 +3572,11 @@ class DashboardApi {
   }
 
   Future<DashboardSnapshot> fetchStats() async {
-    try {
-      final json = await _getJson(_baseUri.replace(path: '/stats'));
-      if (json is! Map<String, dynamic>) {
-        return DashboardSnapshot.empty();
-      }
-      return DashboardSnapshot.fromJson(json);
-    } catch (_) {
-      return DashboardSnapshot.empty();
+    final json = await _getJson(_baseUri.replace(path: '/stats'));
+    if (json is! Map<String, dynamic>) {
+      throw const FormatException('Unexpected /stats payload');
     }
+    return DashboardSnapshot.fromJson(json);
   }
 
   Future<List<CalendarEvent>> fetchEventsForDate(
@@ -3264,13 +3678,7 @@ class DashboardSnapshot {
   }
 
   @override
-  int get hashCode => Object.hash(
-    cpu,
-    mem,
-    net,
-    power,
-    Object.hashAll(events),
-  );
+  int get hashCode => Object.hash(cpu, mem, net, power, Object.hashAll(events));
 }
 
 class ClockConfig {
@@ -3397,12 +3805,8 @@ class AvailabilitySettings {
   }
 
   @override
-  int get hashCode => Object.hash(
-    enabled,
-    workStartMinute,
-    workEndMinute,
-    minimumSlotMinutes,
-  );
+  int get hashCode =>
+      Object.hash(enabled, workStartMinute, workEndMinute, minimumSlotMinutes);
 }
 
 class ClockZoneOption {
